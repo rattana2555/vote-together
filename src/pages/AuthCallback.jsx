@@ -16,7 +16,7 @@ export default function AuthCallback() {
     if (ran.current) return
     ran.current = true
     const result = readLineCallback()
-    history.replaceState({}, '', '/auth/callback')
+    history.replaceState({}, '', location.pathname)
     if (result.error) {
       setError(result.error)
       return

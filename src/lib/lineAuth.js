@@ -3,13 +3,14 @@
 // and verifies the ID token with LINE before issuing our own session token.
 import { ENV } from '../config.js'
 import { store } from './storage.js'
+import { toUrl } from './router.js'
 
 const FLOW_KEY = 'vt-line-flow'
 
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 const randomString = (n = 32) => b64url(crypto.getRandomValues(new Uint8Array(n)))
 
-export const redirectUri = () => `${location.origin}/auth/callback`
+export const redirectUri = () => `${location.origin}${toUrl('/auth/callback')}`
 
 export async function startLineLogin(returnTo = '/') {
   const state = randomString(16)

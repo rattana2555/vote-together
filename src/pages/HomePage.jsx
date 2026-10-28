@@ -8,6 +8,7 @@ import Celebration from '../components/Celebration.jsx'
 import Button from '../components/Button.jsx'
 import { GallerySkeleton } from '../components/Skeleton.jsx'
 import { api } from '../lib/api.js'
+import { ENV } from '../config.js'
 import { navigate } from '../lib/router.js'
 import { page } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
@@ -37,7 +38,7 @@ export default function HomePage() {
   }, [])
 
   useEffect(() => {
-    load()
+    if (ENV.apiBase) load()
   }, [load])
 
   const closed = campaign ? Date.now() > new Date(campaign.endsAt).getTime() : false
@@ -108,7 +109,11 @@ export default function HomePage() {
           {closed && !votedEntryId && <span className="pill">ปิดรับโหวตแล้ว</span>}
         </div>
 
-        {loadError ? (
+        {!ENV.apiBase ? (
+          <div className="empty">
+            <p>ระบบโหวตกำลังจะเปิดเร็ว ๆ นี้</p>
+          </div>
+        ) : loadError ? (
           <div className="empty">
             <p>{loadError}</p>
             <Button variant="ghost" onClick={load}>

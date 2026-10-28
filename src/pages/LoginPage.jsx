@@ -69,7 +69,7 @@ export default function LoginPage() {
             )}
             {!configured && (
               <p className="form-error" role="alert">
-                ยังไม่ได้ตั้งค่า LINE Login (VITE_LINE_CHANNEL_ID / VITE_API_BASE)
+                ระบบเข้าสู่ระบบด้วย LINE กำลังจะเปิดเร็ว ๆ นี้
               </p>
             )}
             <p className="login-fine">

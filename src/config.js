@@ -3,7 +3,7 @@ export const APP = {
   tagline: 'Your Vote. Our Moment.',
   taglineTh: 'ทุกเสียงมีความหมาย ทุกการเลือกสร้างช่วงเวลาร่วมกัน',
   welcome: 'Your voice makes a difference',
-  version: '1.0',
+  version: '1.1',
 }
 
 export const ENV = {

@@ -2,7 +2,7 @@ import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion
 import Logo3D from './Logo3D.jsx'
 import AmbientScene from './AmbientScene.jsx'
 import Button, { LineIcon } from './Button.jsx'
-import { APP } from '../config.js'
+import { APP, isLoginConfigured } from '../config.js'
 import { rise, stagger } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
 import { navigate } from '../lib/router.js'
@@ -42,7 +42,7 @@ export default function Hero({ campaign, entryCount, onStart }) {
               <path d="M12 5v14M5 12l7 7 7-7" />
             </svg>
           </Button>
-          {!user && (
+          {!user && isLoginConfigured() && (
             <Button variant="line" size="lg" onClick={() => navigate('/login')}>
               <LineIcon /> เข้าสู่ระบบด้วย LINE
             </Button>
