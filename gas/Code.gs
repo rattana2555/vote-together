@@ -10,7 +10,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v1.4'
+const VER = 'v1.5'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -74,7 +74,16 @@ const ACTIONS = {
   health: () => {
     const cfg = getConfig()
     const entries = readEntries(cfg)
+    const list = Object.keys(getUsers()).map((k) => getUsers()[k])
+    const dup = (key) => {
+      const seen = {}
+      list.forEach((u) => u[key] && (seen[u[key]] = (seen[u[key]] || 0) + 1))
+      return Object.keys(seen).filter((k) => seen[k] > 1).length
+    }
     return {
+      usersWithPicture: list.filter((u) => u.picKey).length,
+      duplicatePictures: dup('picKey'),
+      duplicateLineNames: dup('lineName'),
       users: Object.keys(getUsers()).length,
       entries: entries.length,
       entriesWithSize: entries.filter((e) => e.width && e.height).length,
@@ -84,25 +93,20 @@ const ACTIONS = {
 
   login: (body) => {
     const line = verifyLineIdToken(body.idToken)
-    const uid = line.sub
-    const u = getUsers()[uid]
+    const u = findEmployee(line)
     if (!u) {
-      const raw = findRawUserRow(uid)
-      const why =
-        (raw ? 'พบในชีทแต่สถานะคือ “' + (raw.status || 'ว่าง') + '”' : 'ไม่พบรหัสนี้ในแท็บ ' + USERS_TAB) +
-        ' · รูปโปรไฟล์ตรงกับพนักงานในชีท ' + countPictureMatches(line.picture) + ' คน'
-      console.warn('login NOT_REGISTERED uid=%s %s', uid, why)
+      console.warn('login not matched sub=%s name=%s', line.sub, line.name)
       throw vtError(
         403,
         'NOT_REGISTERED',
-        'บัญชี LINE นี้ยังไม่ได้ลงทะเบียนพนักงาน กรุณาลงทะเบียนผ่าน LINE HR ก่อน (LINE ID ลงท้าย ' + uid.slice(-6) + ' · ' + why + ')',
+        'ไม่พบบัญชี LINE “' + line.name + '” ในรายชื่อพนักงานที่ลงทะเบียนกับ LINE HR ถ้าเพิ่งเปลี่ยนชื่อหรือรูปโปรไฟล์ LINE แจ้งผู้ดูแลกิจกรรมได้เลย',
       )
     }
     const exp = Date.now() + SESSION_HOURS * 3600 * 1000
     return {
-      token: signSession({ uid: uid, exp: exp }),
+      token: signSession({ uid: u.uid, exp: exp }),
       user: profile(u),
-      votedEntryId: votedEntryOf(getConfig(), uid),
+      votedEntryId: votedEntryOf(getConfig(), u.uid),
     }
   },
 
@@ -222,7 +226,7 @@ function verifyLineIdToken(idToken) {
     throw vtError(401, 'LINE_VERIFY_FAILED', 'ยืนยันตัวตนกับ LINE ไม่สำเร็จ หรือหมดอายุ กรุณาเข้าสู่ระบบใหม่')
   }
   const data = JSON.parse(res.getContentText())
-  return { sub: String(data.sub), picture: String(data.picture || '') }
+  return { sub: String(data.sub), picture: String(data.picture || ''), name: String(data.name || '') }
 }
 
 function sessionSecret() {
@@ -275,7 +279,7 @@ const isAdmin = (u) => ADMIN_EMP_IDS.indexOf(String(u.empId)) !== -1
 
 function getUsers() {
   const cache = CacheService.getScriptCache()
-  const hit = cache.get('users')
+  const hit = cache.get('users2')
   if (hit) return JSON.parse(hit)
   const sh = SpreadsheetApp.openById(USERS_SHEET_ID).getSheetByName(USERS_TAB)
   const values = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 14).getDisplayValues()
@@ -291,33 +295,51 @@ function getUsers() {
       nick: cleanSpaces(r[3]),
       branch: cleanSpaces(r[4]),
       dept: cleanSpaces(r[5]),
+      lineName: normName(r[6]),
+      picKey: pictureKey(r[7]),
       photoId: driveId(r[13]),
     }
   })
-  cache.put('users', JSON.stringify(users), 600)
+  try {
+    cache.put('users2', JSON.stringify(users), 600)
+  } catch (_) {
+    /* over 100KB: read the sheet each time */
+  }
   return users
 }
 
-// ทดลอง: รูปโปรไฟล์ LINE ตรงกับคอลัมน์ H ไหม (ใช้ตัดสินว่าจะจับคู่ด้วยรูปแทน userId ได้หรือเปล่า)
+/*
+ * LINE_USERS เก็บ userId จาก LINE HR ซึ่งอยู่คนละ provider กับ LINE Login ของแอปนี้ (userId จึงไม่ตรงกัน)
+ * เลยจับคู่ครั้งแรกด้วยข้อมูลที่ LINE ยืนยันใน ID token: รูปโปรไฟล์ (คอลัมน์ H) ก่อน แล้วค่อยชื่อ LINE (คอลัมน์ G)
+ * ต้องตรงกับพนักงานคนเดียวเท่านั้น จับคู่ได้แล้วจำไว้ใน Script Properties ครั้งต่อไปไม่ต้องเทียบใหม่
+ */
+function findEmployee(line) {
+  const users = getUsers()
+  if (users[line.sub]) return users[line.sub]
+
+  const props = PropertiesService.getScriptProperties()
+  const linked = props.getProperty('link:' + line.sub)
+  if (linked && users[linked]) return users[linked]
+
+  const list = Object.keys(users).map((k) => users[k])
+  const pic = pictureKey(line.picture)
+  let hits = pic ? list.filter((u) => u.picKey === pic) : []
+  if (hits.length !== 1) {
+    const name = normName(line.name)
+    hits = name ? list.filter((u) => u.lineName === name) : []
+  }
+  if (hits.length !== 1) return null
+  props.setProperty('link:' + line.sub, hits[0].uid)
+  return hits[0]
+}
+
 function pictureKey(url) {
   const m = String(url || '').match(/line-scdn\.net\/([^?#\s]+)/)
   return m ? m[1].replace(/\/(small|large|preview)$/, '') : ''
 }
 
-function countPictureMatches(picture) {
-  const key = pictureKey(picture)
-  if (!key) return 0
-  const sh = SpreadsheetApp.openById(USERS_SHEET_ID).getSheetByName(USERS_TAB)
-  const col = sh.getRange(2, 8, Math.max(sh.getLastRow() - 1, 1), 1).getDisplayValues()
-  return col.filter((r) => pictureKey(r[0]) === key).length
-}
-
-// อ่านแถวตรง ๆ ไม่ผ่านตัวกรองสถานะ ใช้อธิบายว่าทำไมเข้าไม่ได้
-function findRawUserRow(uid) {
-  const sh = SpreadsheetApp.openById(USERS_SHEET_ID).getSheetByName(USERS_TAB)
-  const values = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 9).getDisplayValues()
-  const row = values.find((r) => String(r[0]).trim() === uid)
-  return row ? { status: cleanSpaces(row[8]) } : null
+function normName(v) {
+  return cleanSpaces(v).normalize('NFC')
 }
 
 function profile(u) {
