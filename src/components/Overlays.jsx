@@ -37,7 +37,7 @@ export function WelcomeCard({ user, onDone }) {
         <Avatar user={user} size={46} />
       </motion.span>
       <div>
-        <b>ยินดีต้อนรับ, {user.name}</b>
+        <b title={user.display}>ยินดีต้อนรับ, {user.display}</b>
         <span>{APP.welcome}</span>
       </div>
     </motion.div>

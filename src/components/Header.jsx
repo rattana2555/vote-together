@@ -6,6 +6,7 @@ import Button from './Button.jsx'
 import { linkProps, navigate } from '../lib/router.js'
 import { useSession } from '../state/session.jsx'
 import { spring } from '../lib/motion.js'
+import { APP } from '../config.js'
 
 function ThemeToggle({ theme }) {
   return (
@@ -45,12 +46,20 @@ export default function Header({ path, theme }) {
           ))}
         </nav>
         <div className="topbar-actions">
+          <a className="hub-btn" href={APP.hubUrl} aria-label="กลับไปหน้า Rattana Hub">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+            Hub
+          </a>
           <ThemeToggle theme={theme} />
           {user ? (
             <div className="user-menu">
               <button type="button" className="user-chip" onClick={() => setMenu((m) => !m)} aria-expanded={menu}>
                 <Avatar user={user} size={30} />
-                <span className="user-chip-name">{user.name}</span>
+                <span className="user-chip-name" title={user.display}>
+                  {user.display}
+                </span>
               </button>
               <AnimatePresence>
                 {menu && (

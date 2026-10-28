@@ -1,28 +1,28 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import Logo3D from '../components/Logo3D.jsx'
 import AmbientScene from '../components/AmbientScene.jsx'
 import Button, { LineIcon } from '../components/Button.jsx'
 import Avatar from '../components/Avatar.jsx'
 import { APP, isLoginConfigured } from '../config.js'
 import { navigate } from '../lib/router.js'
-import { page, rise, stagger } from '../lib/motion.js'
+import { page, rise, shake, stagger } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
 
 export default function LoginPage() {
-  const { user, login } = useSession()
-  const [redirecting, setRedirecting] = useState(false)
-  const [error, setError] = useState('')
+  const { user, login, loginError } = useSession()
+  const [busy, setBusy] = useState(false)
+  const [tries, setTries] = useState(0)
   const configured = isLoginConfigured()
 
   const start = async () => {
-    setError('')
-    setRedirecting(true)
+    setBusy(true)
     try {
-      await login('/')
+      await login('/', { fresh: tries > 0 })
     } catch {
-      setRedirecting(false)
-      setError('เปิดหน้าเข้าสู่ระบบ LINE ไม่ได้ กรุณาลองอีกครั้ง')
+      setTries((t) => t + 1)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -42,14 +42,14 @@ export default function LoginPage() {
           {APP.welcome}
         </motion.p>
         <motion.p variants={rise} className="login-sub">
-          {APP.taglineTh}
+          กิจกรรมโหวตภายในบริษัทรัตนไพบูลย์ สำหรับพนักงานที่ลงทะเบียน LINE กับบริษัทแล้ว
         </motion.p>
 
         {user ? (
           <motion.div variants={rise} className="login-signed">
             <Avatar user={user} size={44} />
             <div>
-              <b>{user.name}</b>
+              <b title={user.display}>{user.display}</b>
               <span>เข้าสู่ระบบแล้ว</span>
             </div>
             <Button size="sm" onClick={() => navigate('/')}>
@@ -58,23 +58,30 @@ export default function LoginPage() {
           </motion.div>
         ) : (
           <motion.div variants={rise} className="login-actions">
-            <Button variant="line" size="lg" className="btn-block" onClick={start} disabled={!configured || redirecting}>
-              {redirecting ? <span className="spinner" aria-hidden="true" /> : <LineIcon size={24} />}
-              {redirecting ? 'กำลังพาไปที่ LINE…' : 'เข้าสู่ระบบด้วย LINE'}
+            <Button variant="line" size="lg" className="btn-block" onClick={start} disabled={!configured || busy}>
+              {busy ? <span className="spinner" aria-hidden="true" /> : <LineIcon size={24} />}
+              {busy ? 'กำลังเชื่อมต่อ LINE…' : 'เข้าสู่ระบบด้วย LINE'}
             </Button>
-            {error && (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
-            )}
+            <AnimatePresence>
+              {loginError && (
+                <motion.p
+                  key={loginError + tries}
+                  className="form-error"
+                  role="alert"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto', ...shake }}
+                  exit={{ opacity: 0, height: 0 }}
+                >
+                  {loginError}
+                </motion.p>
+              )}
+            </AnimatePresence>
             {!configured && (
               <p className="form-error" role="alert">
                 ระบบเข้าสู่ระบบด้วย LINE กำลังจะเปิดเร็ว ๆ นี้
               </p>
             )}
-            <p className="login-fine">
-              เราใช้ชื่อและรูปโปรไฟล์ LINE เพื่อยืนยันสิทธิ์ 1 บัญชีต่อ 1 โหวตเท่านั้น
-            </p>
+            <p className="login-fine">ระบบตรวจรายชื่อจากบัญชี LINE ที่ลงทะเบียนพนักงานไว้ 1 บัญชีโหวตได้ 1 ครั้งต่อกิจกรรม</p>
           </motion.div>
         )}
       </motion.div>

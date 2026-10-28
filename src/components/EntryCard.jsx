@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
+import DriveImg, { ratio } from './DriveImg.jsx'
 import { easeOut, softSpring } from '../lib/motion.js'
 
 export default function EntryCard({ entry, index, showCounts, isVoted, isSelected, onOpen }) {
@@ -26,18 +27,10 @@ export default function EntryCard({ entry, index, showCounts, isVoted, isSelecte
         <motion.div
           layoutId={`img-${entry.id}`}
           className={`card-media${loaded ? ' is-loaded' : ''}`}
-          style={{ aspectRatio: `${entry.width} / ${entry.height}` }}
+          style={{ aspectRatio: ratio(entry) }}
           transition={softSpring}
         >
-          <img
-            src={entry.image}
-            alt={entry.title}
-            width={entry.width}
-            height={entry.height}
-            loading={index < 4 ? 'eager' : 'lazy'}
-            decoding="async"
-            onLoad={() => setLoaded(true)}
-          />
+          <DriveImg id={entry.imageId} alt={entry.title} onReady={() => setLoaded(true)} />
           {isVoted && (
             <span className="badge badge-voted">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -48,9 +41,9 @@ export default function EntryCard({ entry, index, showCounts, isVoted, isSelecte
           )}
         </motion.div>
         <div className="card-meta">
-          <h3>{entry.title}</h3>
+          <h3 title={entry.title}>{entry.title}</h3>
           <p>
-            <span>{entry.author}</span>
+            <span title={entry.author}>{entry.author}</span>
             {showCounts && typeof entry.votes === 'number' && (
               <span className="votes">{entry.votes.toLocaleString('th-TH')} โหวต</span>
             )}

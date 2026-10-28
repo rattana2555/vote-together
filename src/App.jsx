@@ -3,7 +3,6 @@ import Header from './components/Header.jsx'
 import { DevBanner, LoadingScreen, WelcomeCard } from './components/Overlays.jsx'
 import HomePage from './pages/HomePage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
-import AuthCallback from './pages/AuthCallback.jsx'
 import AdminPage from './pages/AdminPage.jsx'
 import { APP, ENV } from './config.js'
 import { usePath } from './lib/router.js'
@@ -13,7 +12,6 @@ import { useSession } from './state/session.jsx'
 const ROUTES = {
   '/': HomePage,
   '/login': LoginPage,
-  '/auth/callback': AuthCallback,
   '/admin': AdminPage,
 }
 

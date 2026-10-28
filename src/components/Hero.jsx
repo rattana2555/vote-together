@@ -8,7 +8,7 @@ import { useSession } from '../state/session.jsx'
 import { navigate } from '../lib/router.js'
 
 const fmtDate = (iso) =>
-  new Date(iso).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
+  new Date(iso).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 export default function Hero({ campaign, entryCount, onStart }) {
   const { user } = useSession()
@@ -50,12 +50,16 @@ export default function Hero({ campaign, entryCount, onStart }) {
         </motion.div>
         {campaign && (
           <motion.ul variants={rise} className="hero-facts">
-            <li>
-              <b>{entryCount}</b> ผลงาน
-            </li>
-            <li>
-              ปิดโหวต <b>{fmtDate(campaign.endsAt)}</b>
-            </li>
+            {typeof entryCount === 'number' && (
+              <li>
+                <b>{entryCount}</b> ผลงาน
+              </li>
+            )}
+            {campaign.endsAt && (
+              <li>
+                {campaign.closed ? 'ปิดโหวตแล้ว' : 'ปิดโหวต'} <b>{fmtDate(campaign.endsAt)}</b>
+              </li>
+            )}
             <li>
               <b>1</b> สิทธิ์ / บัญชี LINE
             </li>

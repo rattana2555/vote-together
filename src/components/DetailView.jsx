@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import Button from './Button.jsx'
+import DriveImg, { ratio, ratioNum } from './DriveImg.jsx'
 import { softSpring, spring } from '../lib/motion.js'
 
 export default function DetailView({ entry, showCounts, votedEntryId, closed, user, onClose, onVote }) {
@@ -49,10 +50,10 @@ export default function DetailView({ entry, showCounts, votedEntryId, closed, us
         <motion.div
           layoutId={`img-${entry.id}`}
           className="detail-media"
-          style={{ aspectRatio: `${entry.width} / ${entry.height}`, '--ar': entry.width / entry.height }}
+          style={{ aspectRatio: ratio(entry), '--ar': ratioNum(entry) }}
           transition={softSpring}
         >
-          <img src={entry.image} alt={entry.title} width={entry.width} height={entry.height} />
+          <DriveImg id={entry.imageId} size="l" alt={entry.title} />
         </motion.div>
         <motion.div
           className="detail-info"

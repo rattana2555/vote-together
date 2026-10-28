@@ -5,16 +5,16 @@ import EntryCard from '../components/EntryCard.jsx'
 import DetailView from '../components/DetailView.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import Celebration from '../components/Celebration.jsx'
-import Button from '../components/Button.jsx'
+import Button, { LineIcon } from '../components/Button.jsx'
 import { GallerySkeleton } from '../components/Skeleton.jsx'
 import { api } from '../lib/api.js'
-import { ENV } from '../config.js'
+import { ENV, isLoginConfigured } from '../config.js'
 import { navigate } from '../lib/router.js'
 import { page } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
 
 export default function HomePage() {
-  const { user, votedEntryId, setVotedEntryId } = useSession()
+  const { user, ready, votedEntryId, setVotedEntryId } = useSession()
   const [campaign, setCampaign] = useState(null)
   const [entries, setEntries] = useState(null)
   const [loadError, setLoadError] = useState('')
@@ -26,30 +26,29 @@ export default function HomePage() {
   const [celebrate, setCelebrate] = useState(null)
   const galleryRef = useRef(null)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (ENV.apiBase) api.campaign().then(setCampaign, () => {})
+  }, [])
+
+  const loadEntries = useCallback(async () => {
     setLoadError('')
     try {
-      const [c, e] = await Promise.all([api.campaign(), api.entries()])
-      setCampaign(c)
-      setEntries(e)
+      setEntries(await api.entries())
     } catch (err) {
       setLoadError(err.message)
     }
   }, [])
 
   useEffect(() => {
-    if (ENV.apiBase) load()
-  }, [load])
+    if (user) loadEntries()
+    else setEntries(null)
+  }, [user, loadEntries])
 
-  const closed = campaign ? Date.now() > new Date(campaign.endsAt).getTime() : false
+  const closed = Boolean(campaign?.closed)
   const openEntry = entries?.find((e) => e.id === openId)
   const selectedEntry = entries?.find((e) => e.id === selectedId)
 
   const requestVote = (id) => {
-    if (!user) {
-      navigate('/login')
-      return
-    }
     setVoteError('')
     setStatus('idle')
     setSelectedId(id)
@@ -68,8 +67,8 @@ export default function HomePage() {
     setVoteError('')
     try {
       const res = await api.vote(id)
-      if (!res?.ok) throw new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการบันทึกคะแนน')
-      setVotedEntryId(res.entryId ?? id)
+      if (!res?.ok || res.entryId !== id) throw new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการบันทึกคะแนน')
+      setVotedEntryId(res.entryId)
       if (typeof res.votes === 'number') {
         setEntries((list) => list.map((e) => (e.id === id ? { ...e, votes: res.votes } : e)))
       }
@@ -91,11 +90,86 @@ export default function HomePage() {
   const closeDetail = useCallback(() => setOpenId(null), [])
   const endCelebrate = useCallback(() => setCelebrate(null), [])
 
+  let body
+  if (!ENV.apiBase) {
+    body = (
+      <div className="empty">
+        <p>ระบบโหวตกำลังจะเปิดเร็ว ๆ นี้</p>
+      </div>
+    )
+  } else if (!user) {
+    body = ready ? (
+      <div className="empty gate">
+        <p>
+          <b>ผลงานในกิจกรรมนี้เปิดให้เฉพาะพนักงาน</b>
+          <br />
+          เข้าสู่ระบบด้วย LINE ที่ลงทะเบียนกับบริษัทเพื่อดูผลงานและโหวต
+        </p>
+        {isLoginConfigured() && (
+          <Button variant="line" onClick={() => navigate('/login')}>
+            <LineIcon /> เข้าสู่ระบบด้วย LINE
+          </Button>
+        )}
+      </div>
+    ) : (
+      <GallerySkeleton />
+    )
+  } else if (loadError) {
+    body = (
+      <div className="empty">
+        <p>{loadError}</p>
+        <Button variant="ghost" onClick={loadEntries}>
+          ลองโหลดใหม่
+        </Button>
+      </div>
+    )
+  } else if (!entries) {
+    body = <GallerySkeleton />
+  } else if (entries.length === 0) {
+    body = (
+      <div className="empty">
+        <p>ยังไม่มีผลงานในกิจกรรมนี้</p>
+      </div>
+    )
+  } else {
+    body = (
+      <LayoutGroup>
+        <div className="gallery">
+          {entries.map((entry, i) => (
+            <EntryCard
+              key={entry.id}
+              entry={entry}
+              index={i}
+              showCounts={campaign?.showCounts || user?.role === 'admin'}
+              isVoted={votedEntryId === entry.id}
+              isSelected={selectedId === entry.id}
+              onOpen={setOpenId}
+            />
+          ))}
+        </div>
+        <AnimatePresence>
+          {openEntry && (
+            <DetailView
+              key={openEntry.id}
+              entry={openEntry}
+              showCounts={campaign?.showCounts || user?.role === 'admin'}
+              votedEntryId={votedEntryId}
+              closed={closed}
+              user={user}
+              onClose={closeDetail}
+              onVote={requestVote}
+            />
+          )}
+        </AnimatePresence>
+      </LayoutGroup>
+    )
+  }
+
   return (
     <motion.main {...page} className="page">
       <Hero
         campaign={campaign}
-        entryCount={entries?.length ?? 0}
+        entryCount={entries?.length}
         onStart={() => galleryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
       />
 
@@ -103,60 +177,12 @@ export default function HomePage() {
         <div className="section-head">
           <div>
             <h2 id="gallery-title">ผลงานทั้งหมด</h2>
-            <p>{campaign?.subtitle ?? 'แตะที่ภาพเพื่อดูรายละเอียดและโหวต'}</p>
+            <p>{campaign?.subtitle || 'แตะที่ภาพเพื่อดูรายละเอียดและโหวต'}</p>
           </div>
-          {votedEntryId && <span className="pill pill-success">คุณโหวตแล้ว · ขอบคุณที่ร่วมสร้างช่วงเวลานี้</span>}
+          {user && votedEntryId && <span className="pill pill-success">คุณโหวตแล้ว · ขอบคุณที่ร่วมสร้างช่วงเวลานี้</span>}
           {closed && !votedEntryId && <span className="pill">ปิดรับโหวตแล้ว</span>}
         </div>
-
-        {!ENV.apiBase ? (
-          <div className="empty">
-            <p>ระบบโหวตกำลังจะเปิดเร็ว ๆ นี้</p>
-          </div>
-        ) : loadError ? (
-          <div className="empty">
-            <p>{loadError}</p>
-            <Button variant="ghost" onClick={load}>
-              ลองโหลดใหม่
-            </Button>
-          </div>
-        ) : !entries ? (
-          <GallerySkeleton />
-        ) : entries.length === 0 ? (
-          <div className="empty">
-            <p>ยังไม่มีผลงานในกิจกรรมนี้</p>
-          </div>
-        ) : (
-          <LayoutGroup>
-            <div className="gallery">
-              {entries.map((entry, i) => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  index={i}
-                  showCounts={campaign?.showCounts}
-                  isVoted={votedEntryId === entry.id}
-                  isSelected={selectedId === entry.id}
-                  onOpen={setOpenId}
-                />
-              ))}
-            </div>
-            <AnimatePresence>
-              {openEntry && (
-                <DetailView
-                  key={openEntry.id}
-                  entry={openEntry}
-                  showCounts={campaign?.showCounts}
-                  votedEntryId={votedEntryId}
-                  closed={closed}
-                  user={user}
-                  onClose={closeDetail}
-                  onVote={requestVote}
-                />
-              )}
-            </AnimatePresence>
-          </LayoutGroup>
-        )}
+        {body}
       </section>
 
       <AnimatePresence>

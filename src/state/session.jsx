@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { api, session } from '../lib/api.js'
-import { startLineLogin } from '../lib/lineAuth.js'
+import { clearImageCache } from '../lib/images.js'
+import { lineLogout, resumeLineLogin, startLineLogin, takeReturnTo } from '../lib/lineAuth.js'
+import { navigate } from '../lib/router.js'
 
 const SessionContext = createContext(null)
 
@@ -9,46 +11,71 @@ export function SessionProvider({ children }) {
   const [votedEntryId, setVotedEntryId] = useState(null)
   const [ready, setReady] = useState(false)
   const [welcome, setWelcome] = useState(false)
+  const [loginError, setLoginError] = useState('')
 
-  const refresh = useCallback(async () => {
-    if (!session.token) {
-      setUser(null)
-      setVotedEntryId(null)
-      return
-    }
-    try {
-      const me = await api.me()
-      setUser(me.user)
-      setVotedEntryId(me.votedEntryId ?? null)
-    } catch {
-      setUser(null)
-    }
+  const completeLogin = useCallback(async (idToken) => {
+    const res = await api.login(idToken)
+    session.token = res.token
+    setUser(res.user)
+    setVotedEntryId(res.votedEntryId ?? null)
+    setLoginError('')
+    setWelcome(true)
   }, [])
 
   useEffect(() => {
-    refresh().finally(() => setReady(true))
-  }, [refresh])
+    let alive = true
+    ;(async () => {
+      if (session.token) {
+        try {
+          const me = await api.me()
+          if (!alive) return
+          setUser(me.user)
+          setVotedEntryId(me.votedEntryId ?? null)
+        } catch {
+          /* expired session: fall through to LINE */
+        }
+      }
+      if (!session.token) {
+        try {
+          const idToken = await resumeLineLogin()
+          if (idToken && alive) {
+            await completeLogin(idToken)
+            navigate(takeReturnTo() || '/', { replace: true })
+          }
+        } catch (err) {
+          if (alive) setLoginError(err.message || 'เข้าสู่ระบบไม่สำเร็จ')
+        }
+      }
+      if (alive) setReady(true)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [completeLogin])
 
-  const completeLogin = useCallback(
-    async (payload) => {
-      const { token, user: u } = await api.exchangeLineCode(payload)
-      session.token = token
-      setUser(u)
-      await refresh()
-      setWelcome(true)
+  const login = useCallback(
+    async (returnTo = '/', opts) => {
+      setLoginError('')
+      try {
+        const idToken = await startLineLogin(returnTo, opts)
+        if (!idToken) return
+        await completeLogin(idToken)
+        navigate(takeReturnTo() || returnTo, { replace: true })
+      } catch (err) {
+        setLoginError(err.message || 'เข้าสู่ระบบไม่สำเร็จ')
+        throw err
+      }
     },
-    [refresh],
+    [completeLogin],
   )
 
-  const logout = useCallback(async () => {
-    try {
-      await api.logout()
-    } catch {
-      /* session is dropped locally either way */
-    }
+  const logout = useCallback(() => {
     session.token = null
+    lineLogout()
+    clearImageCache()
     setUser(null)
     setVotedEntryId(null)
+    navigate('/')
   }, [])
 
   const value = useMemo(
@@ -57,13 +84,13 @@ export function SessionProvider({ children }) {
       ready,
       votedEntryId,
       setVotedEntryId,
-      login: startLineLogin,
-      completeLogin,
+      login,
       logout,
+      loginError,
       welcome,
       dismissWelcome: () => setWelcome(false),
     }),
-    [user, ready, votedEntryId, completeLogin, logout, welcome],
+    [user, ready, votedEntryId, login, logout, loginError, welcome],
   )
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

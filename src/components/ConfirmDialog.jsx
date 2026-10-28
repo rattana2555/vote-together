@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Button from './Button.jsx'
+import DriveImg from './DriveImg.jsx'
 import { shake, spring } from '../lib/motion.js'
 
 export default function ConfirmDialog({ entry, status, error, errorKey, onConfirm, onCancel }) {
@@ -28,7 +29,7 @@ export default function ConfirmDialog({ entry, status, error, errorKey, onConfir
         transition={spring}
       >
         <div className="dialog-thumb">
-          <img src={entry.image} alt="" />
+          <DriveImg id={entry.imageId} alt="" />
           <span className="ring" aria-hidden="true">
             <i />
             <i />

@@ -1,56 +1,80 @@
-// LINE Login v2.1 authorization-code flow with PKCE.
-// The browser only obtains the one-time `code`; the backend exchanges it using the channel secret
-// and verifies the ID token with LINE before issuing our own session token.
+// LINE login via LIFF. The browser only gets a LINE ID token; the Apps Script backend verifies it
+// with LINE and checks the userId against the LINE_USERS sheet before issuing our own session.
 import { ENV } from '../config.js'
 import { store } from './storage.js'
 import { toUrl } from './router.js'
 
-const FLOW_KEY = 'vt-line-flow'
+const RETURN_KEY = 'vt-return-to'
+const LIFF_SDK = 'https://static.line-scdn.net/liff/edge/2/sdk.js'
 
-const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-const randomString = (n = 32) => b64url(crypto.getRandomValues(new Uint8Array(n)))
+let sdkPromise = null
+let ready = false
 
-export const redirectUri = () => `${location.origin}${toUrl('/auth/callback')}`
-
-export async function startLineLogin(returnTo = '/') {
-  const state = randomString(16)
-  const nonce = randomString(16)
-  const verifier = randomString(48)
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))
-  store.set(FLOW_KEY, JSON.stringify({ state, nonce, verifier, returnTo }), sessionStorage)
-
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: ENV.lineChannelId,
-    redirect_uri: redirectUri(),
-    state,
-    nonce,
-    scope: 'profile openid',
-    code_challenge: b64url(digest),
-    code_challenge_method: 'S256',
+function loadSdk() {
+  if (window.liff) return Promise.resolve(window.liff)
+  sdkPromise ||= new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = LIFF_SDK
+    s.onload = () => resolve(window.liff)
+    s.onerror = () => {
+      sdkPromise = null
+      reject(new Error('โหลด LINE ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่'))
+    }
+    document.head.appendChild(s)
   })
-  location.assign(`${ENV.lineAuthorizeUrl}?${params}`)
+  return sdkPromise
 }
 
-export function readLineCallback() {
-  const q = new URLSearchParams(location.search)
-  let flow = null
-  try {
-    flow = JSON.parse(store.get(FLOW_KEY, sessionStorage) || 'null')
-  } catch {
-    flow = null
+async function initLiff() {
+  const liff = await loadSdk()
+  if (!ready) {
+    await liff.init({ liffId: ENV.liffId })
+    ready = true
   }
-  store.set(FLOW_KEY, null, sessionStorage)
+  return liff
+}
 
-  if (q.get('error')) {
-    const cancelled = q.get('error') === 'access_denied'
-    return { error: cancelled ? 'คุณยกเลิกการเข้าสู่ระบบด้วย LINE' : `LINE แจ้งข้อผิดพลาด: ${q.get('error_description') || q.get('error')}` }
+const loginUrl = () => `${location.origin}${toUrl('/login')}`
+
+export async function startLineLogin(returnTo = '/', { fresh = false } = {}) {
+  store.set(RETURN_KEY, returnTo, sessionStorage)
+  if (ENV.isMock) {
+    location.assign(`${ENV.mockAuthorizeUrl}?redirect_uri=${encodeURIComponent(loginUrl())}`)
+    return null
   }
-  if (!flow || !q.get('code') || q.get('state') !== flow.state) {
-    return { error: 'ลิงก์เข้าสู่ระบบไม่ถูกต้องหรือหมดอายุ กรุณาเริ่มใหม่อีกครั้ง' }
+  const liff = await initLiff()
+  if (fresh && liff.isLoggedIn()) liff.logout()
+  if (liff.isLoggedIn()) return liff.getIDToken()
+  liff.login({ redirectUri: loginUrl() })
+  return null
+}
+
+// Called on app start: picks up the result of a LINE login redirect, or logs in silently inside the LINE app.
+// Memoized because the redirect params are consumed on first read.
+let resumed = null
+export const resumeLineLogin = () => (resumed ||= readLoginResult())
+
+async function readLoginResult() {
+  const q = new URLSearchParams(location.search)
+  if (ENV.isMock) {
+    const token = q.get('mock_id_token')
+    const error = q.get('error')
+    if (token || error) history.replaceState({}, '', location.pathname)
+    if (error) throw new Error('คุณยกเลิกการเข้าสู่ระบบด้วย LINE')
+    return token
   }
-  return {
-    payload: { code: q.get('code'), codeVerifier: flow.verifier, nonce: flow.nonce, redirectUri: redirectUri() },
-    returnTo: flow.returnTo || '/',
-  }
+  const fromLine = q.has('code') || q.has('liffClientId') || q.has('liff.state') || /\bLine\//i.test(navigator.userAgent)
+  if (!ENV.liffId || !fromLine) return null
+  const liff = await initLiff()
+  return liff.isLoggedIn() ? liff.getIDToken() : null
+}
+
+export function takeReturnTo() {
+  const to = store.get(RETURN_KEY, sessionStorage)
+  store.set(RETURN_KEY, null, sessionStorage)
+  return to
+}
+
+export function lineLogout() {
+  if (ready && window.liff?.isLoggedIn()) window.liff.logout()
 }
