@@ -1,4 +1,4 @@
-# VOTE TOGETHER · v2.0
+# VOTE TOGETHER · v2.1
 
 **Your Vote. Our Moment.** — ทุกเสียงมีความหมาย ทุกการเลือกสร้างช่วงเวลาร่วมกัน
 
@@ -28,7 +28,7 @@
 |---|---|
 | Apps Script | โปรเจกต์ "VOTE TOGETHER API" (scriptId ใน `gas/.clasp.json`) · deploy: `powershell -File D:\Calude\tools\gas-deploy.ps1` ในโฟลเดอร์ `gas` |
 | อนุญาตสิทธิ์สคริปต์ | เปิดหน้า Apps Script แล้วกด Run ฟังก์ชัน `setup` 1 ครั้ง |
-| LIFF | LINE Developers → provider Rattana → LINE Login channel `2010518208` → LIFF → Add · Endpoint `https://rattana2555.github.io/vote-together/` · Scope `openid`, `profile` |
+| LIFF | LINE Developers → provider **HR** → LINE Login channel `2012261091` (VOTE TOGETHER, Published) → LIFF `2012261091-KgtW0QdR` |
 | ค่าให้เว็บ | GitHub repo → Settings → Secrets and variables → Actions → **Variables**: `VITE_API_BASE` (URL `/exec`), `VITE_LIFF_ID` |
 
 push ขึ้น `main` แล้ว GitHub Actions จะ build และ deploy ขึ้น Pages ให้เอง

@@ -10,11 +10,11 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v1.0'
+const VER = 'v1.2'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
-const LINE_CHANNEL_ID = '2010518208' // LINE Login channel ใต้ provider Rattana (provider เดียวกับ OA → userId ตรงกับ LINE_USERS)
+const LINE_CHANNEL_ID = '2012261091' // LINE Login channel "VOTE TOGETHER" ใต้ provider HR (provider เดียวกับ LINE HR → userId ตรงกับ LINE_USERS)
 
 // รหัสพนักงานที่เข้าแดชบอร์ดและเปลี่ยนชีทกิจกรรมได้
 const ADMIN_EMP_IDS = []
@@ -69,6 +69,18 @@ function setup() {
 
 const ACTIONS = {
   campaign: () => ({ campaign: publicCampaign(getConfig()) }),
+
+  // ตัวเลขสรุปสำหรับเช็คว่าระบบอ่านชีท/รูปได้ (ไม่มีข้อมูลส่วนตัว)
+  health: () => {
+    const cfg = getConfig()
+    const entries = readEntries(cfg)
+    return {
+      users: Object.keys(getUsers()).length,
+      entries: entries.length,
+      entriesWithSize: entries.filter((e) => e.width && e.height).length,
+      votes: readVotes(cfg).length,
+    }
+  },
 
   login: (body) => {
     const uid = verifyLineIdToken(body.idToken)
