@@ -10,7 +10,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v1.2'
+const VER = 'v1.3'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -86,7 +86,14 @@ const ACTIONS = {
     const uid = verifyLineIdToken(body.idToken)
     const u = getUsers()[uid]
     if (!u) {
-      throw vtError(403, 'NOT_REGISTERED', 'บัญชี LINE นี้ยังไม่ได้ลงทะเบียนพนักงาน กรุณาลงทะเบียนผ่าน LINE OA ของบริษัทก่อน')
+      const raw = findRawUserRow(uid)
+      const why = raw ? 'พบในชีทแต่สถานะคือ “' + (raw.status || 'ว่าง') + '”' : 'ไม่พบรหัสนี้ในแท็บ ' + USERS_TAB
+      console.warn('login NOT_REGISTERED uid=%s %s', uid, why)
+      throw vtError(
+        403,
+        'NOT_REGISTERED',
+        'บัญชี LINE นี้ยังไม่ได้ลงทะเบียนพนักงาน กรุณาลงทะเบียนผ่าน LINE HR ก่อน (LINE ID ลงท้าย ' + uid.slice(-6) + ' · ' + why + ')',
+      )
     }
     const exp = Date.now() + SESSION_HOURS * 3600 * 1000
     return {
@@ -286,6 +293,14 @@ function getUsers() {
   })
   cache.put('users', JSON.stringify(users), 600)
   return users
+}
+
+// อ่านแถวตรง ๆ ไม่ผ่านตัวกรองสถานะ ใช้อธิบายว่าทำไมเข้าไม่ได้
+function findRawUserRow(uid) {
+  const sh = SpreadsheetApp.openById(USERS_SHEET_ID).getSheetByName(USERS_TAB)
+  const values = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 9).getDisplayValues()
+  const row = values.find((r) => String(r[0]).trim() === uid)
+  return row ? { status: cleanSpaces(row[8]) } : null
 }
 
 function profile(u) {
