@@ -8,6 +8,12 @@ const cache = new Map()
 const waiting = new Map()
 let queue = []
 let timer = 0
+let scope = null
+
+// Admin screens show entries of non-active campaigns; the backend only serves those when told which campaign.
+export function setImageScope(campaignId) {
+  scope = campaignId || null
+}
 
 function flush() {
   timer = 0
@@ -19,7 +25,7 @@ function flush() {
     for (let i = 0; i < ids.length; i += BATCH) {
       const chunk = ids.slice(i, i + BATCH)
       api
-        .images(chunk, size)
+        .images(chunk, size, scope)
         .catch(() => ({}))
         .then((images) => {
           chunk.forEach((id) => {
@@ -65,4 +71,10 @@ export function useDriveImage(id, size = 's') {
 
 export function clearImageCache() {
   cache.clear()
+}
+
+// Lets a freshly uploaded photo show right away instead of waiting for Drive to build its thumbnail.
+export function primeImage(id, src) {
+  cache.set(`s:${id}`, src)
+  cache.set(`l:${id}`, src)
 }

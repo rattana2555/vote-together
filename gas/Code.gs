@@ -1,23 +1,25 @@
 /**
  * VOTE TOGETHER API — Google Apps Script backend
  *
- * - เข้าสู่ระบบ: เว็บส่ง LINE ID token (จาก LIFF) มา → ยืนยันกับ LINE → ต้องมี userId อยู่ในแท็บ LINE_USERS
- * - ผลงาน: อ่านจากชีทกิจกรรม (เช่นชีทคำตอบ Google Form) ที่แอดมินตั้งไว้ เปลี่ยนชีทได้จากหน้าแดชบอร์ด
- * - คะแนน: เก็บในแท็บ VOTE_TOGETHER_VOTES ของชีทกิจกรรมนั้น (1 บัญชี LINE = 1 โหวต / กิจกรรม)
+ * - เข้าสู่ระบบ: เว็บส่ง LINE ID token (จาก LIFF) มา → ยืนยันกับ LINE → จับคู่กับพนักงานในแท็บ LINE_USERS
+ * - กิจกรรม: แอดมินสร้างได้หลายกิจกรรมในแอป แต่ละกิจกรรมเลือกแหล่งผลงานได้ 2 แบบ
+ *     · 'app'   อัปโหลดรูปผ่านแอป (ไฟล์อยู่ในโฟลเดอร์ VOTE TOGETHER Uploads · ข้อมูลอยู่ในชีท VOTE TOGETHER Data)
+ *     · 'sheet' ดึงจากชีทคำตอบ Google Form (คะแนนเก็บในแท็บ VOTE_TOGETHER_VOTES ของชีทนั้น)
+ *   เปิดใช้ได้ทีละ 1 กิจกรรม (ACTIVE_CAMPAIGN) · 1 บัญชี LINE = 1 โหวต / กิจกรรม
  * - รูป: ดึงผ่านสคริปต์นี้เท่านั้น (ไม่ต้องแชร์ไฟล์ใน Drive เป็นสาธารณะ) และให้เฉพาะคนที่ login แล้ว
  *
  * Deploy: Web app · Execute as: Me · Who has access: Anyone
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v1.5'
+const VER = 'v2.0'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
-const LINE_CHANNEL_ID = '2012261091' // LINE Login channel "VOTE TOGETHER" ใต้ provider HR (provider เดียวกับ LINE HR → userId ตรงกับ LINE_USERS)
+const LINE_CHANNEL_ID = '2012261091' // LINE Login channel "VOTE TOGETHER" (provider HR)
 
-// รหัสพนักงานที่เข้าแดชบอร์ดและเปลี่ยนชีทกิจกรรมได้
-const ADMIN_EMP_IDS = []
+// แอดมินตั้งต้น (เพิ่ม/ลบคนอื่นได้ในแอป หน้าแดชบอร์ด → ผู้ดูแล)
+const SEED_ADMIN_EMP_IDS = ['68030']
 
 const DEFAULT_EVENT = {
   sheetUrl: 'https://docs.google.com/spreadsheets/d/16Fc0BpnTPZnDXHYgXGgjOZaJSdVE6aCmCkJHMt2H49A/edit?gid=682041097',
@@ -29,6 +31,13 @@ const DEFAULT_EVENT = {
 
 const VOTES_TAB = 'VOTE_TOGETHER_VOTES'
 const VOTES_HEADER = ['เวลา', 'LINE userId', 'รหัสพนักงาน', 'ชื่อผู้โหวต', 'รหัสผลงาน', 'ชื่อผลงาน']
+
+const DATA_TABS = {
+  CAMPAIGNS: ['รหัสกิจกรรม', 'ชื่อกิจกรรม', 'คำโปรย', 'ปิดโหวต', 'โชว์คะแนน', 'แหล่งผลงาน', 'ลิงก์ชีท', 'สร้างเมื่อ', 'สร้างโดย'],
+  ENTRIES: ['รหัสกิจกรรม', 'รหัสผลงาน', 'ชื่อผลงาน', 'เจ้าของผลงาน', 'รหัสรูป', 'กว้าง', 'สูง', 'เพิ่มเมื่อ', 'เพิ่มโดย'],
+  VOTES: ['รหัสกิจกรรม'].concat(VOTES_HEADER),
+}
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 const SESSION_HOURS = 72
 const IMAGE_SIZES = { s: 's640', l: 's1600', a: 's200' }
 const MAX_IMAGES_PER_CALL = 8
@@ -63,8 +72,9 @@ function setup() {
   DriveApp.getRootFolder()
   UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify?access_token=x', { muteHttpExceptions: true })
   sessionSecret()
+  dataBook()
   const cfg = getConfig()
-  console.log('OK · %s · ผู้ใช้ %s คน · ผลงาน %s ชิ้น', VER, Object.keys(getUsers()).length, readEntries(cfg).length)
+  console.log('OK · %s · ผู้ใช้ %s คน · กิจกรรม "%s" ผลงาน %s ชิ้น', VER, Object.keys(getUsers()).length, cfg.title, readEntries(cfg).length)
 }
 
 const ACTIONS = {
@@ -73,20 +83,12 @@ const ACTIONS = {
   // ตัวเลขสรุปสำหรับเช็คว่าระบบอ่านชีท/รูปได้ (ไม่มีข้อมูลส่วนตัว)
   health: () => {
     const cfg = getConfig()
-    const entries = readEntries(cfg)
-    const list = Object.keys(getUsers()).map((k) => getUsers()[k])
-    const dup = (key) => {
-      const seen = {}
-      list.forEach((u) => u[key] && (seen[u[key]] = (seen[u[key]] || 0) + 1))
-      return Object.keys(seen).filter((k) => seen[k] > 1).length
-    }
+    const users = getUsers()
     return {
-      usersWithPicture: list.filter((u) => u.picKey).length,
-      duplicatePictures: dup('picKey'),
-      duplicateLineNames: dup('lineName'),
-      users: Object.keys(getUsers()).length,
-      entries: entries.length,
-      entriesWithSize: entries.filter((e) => e.width && e.height).length,
+      users: Object.keys(users).length,
+      campaigns: listCampaigns().length,
+      activeSource: cfg.source,
+      entries: readEntries(cfg).length,
       votes: readVotes(cfg).length,
     }
   },
@@ -137,7 +139,7 @@ const ACTIONS = {
     const u = requireUser(body)
     const size = IMAGE_SIZES[body.size] ? body.size : 's'
     const ids = (body.ids || []).map(String).slice(0, MAX_IMAGES_PER_CALL)
-    const allowed = allowedImageIds(u)
+    const allowed = allowedImageIds(u, body.campaignId)
     return { images: loadImages(ids.filter((id) => allowed[id]), size) }
   },
 
@@ -146,7 +148,7 @@ const ACTIONS = {
     const cfg = getConfig()
     if (isClosed(cfg)) throw vtError(403, 'CLOSED', 'ปิดรับโหวตแล้ว')
     const entry = readEntries(cfg).find((e) => e.id === String(body.entryId))
-    if (!entry) throw vtError(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้ อาจถูกลบออกจากชีทแล้ว')
+    if (!entry) throw vtError(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้ อาจถูกลบออกไปแล้ว')
 
     const lock = LockService.getScriptLock()
     if (!lock.tryLock(20000)) throw vtError(503, 'BUSY', 'มีคนโหวตพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง')
@@ -154,10 +156,7 @@ const ACTIONS = {
       const votes = readVotes(cfg)
       const mine = votes.find((v) => v.uid === u.uid)
       if (mine) throw vtError(409, 'ALREADY_VOTED', 'บัญชีนี้โหวตไปแล้ว', { votedEntryId: mine.entryId })
-      const sh = votesSheet(cfg)
-      const row = [nowText(), u.uid, u.empId, displayName(u), entry.id, entry.title]
-      sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@').setValues([row])
-      SpreadsheetApp.flush()
+      appendVote(cfg, [nowText(), u.uid, u.empId, displayName(u), entry.id, entry.title])
       const count = votes.filter((v) => v.entryId === entry.id).length + 1
       return { entryId: entry.id, votes: cfg.showCounts ? count : undefined }
     } finally {
@@ -165,12 +164,15 @@ const ACTIONS = {
     }
   },
 
+  /* ── แอดมิน ── */
+
   stats: (body) => {
     requireAdmin(body)
-    const cfg = getConfig()
+    const cfg = body.campaignId ? campaignById(body.campaignId) : getConfig()
     const votes = readVotes(cfg)
     const counts = countVotes(votes)
     return {
+      campaign: publicCampaign(cfg),
       totalVotes: votes.length,
       voters: Object.keys(votes.reduce((m, v) => ((m[v.uid] = 1), m), {})).length,
       eligible: Object.keys(getUsers()).length,
@@ -179,37 +181,140 @@ const ACTIONS = {
     }
   },
 
-  getConfig: (body) => {
+  campaigns: (body) => {
     requireAdmin(body)
-    const cfg = getConfig()
-    return { config: cfg, detected: describeEvent(cfg) }
+    const active = getConfig().id
+    return { campaigns: listCampaigns().map((c) => Object.assign({}, c, { active: c.id === active, closed: isClosed(c) })) }
   },
 
-  saveConfig: (body) => {
+  campaignEntries: (body) => {
     requireAdmin(body)
-    const c = body.config || {}
+    const cfg = campaignById(body.campaignId)
+    const counts = countVotes(readVotes(cfg))
+    return {
+      entries: readEntries(cfg).map((e) => Object.assign({}, e, { votes: counts[e.id] || 0 })),
+      detected: cfg.source === 'sheet' ? describeEvent(cfg) : null,
+    }
+  },
+
+  saveCampaign: (body) => {
+    const admin = requireAdmin(body)
+    const c = body.campaign || {}
+    const prev = c.id ? campaignById(c.id) : null
     const next = {
-      sheetUrl: String(c.sheetUrl || '').trim(),
+      id: prev ? prev.id : newId('c'),
       title: String(c.title || '').trim(),
       subtitle: String(c.subtitle || '').trim(),
       endsAt: String(c.endsAt || '').trim(),
       showCounts: Boolean(c.showCounts),
+      source: c.source === 'sheet' ? 'sheet' : 'app',
+      sheetUrl: c.source === 'sheet' ? String(c.sheetUrl || '').trim() : '',
+      createdAt: prev ? prev.createdAt : nowText(),
+      createdBy: prev ? prev.createdBy : displayName(admin),
     }
-    if (!parseSheetUrl(next.sheetUrl).id) throw vtError(400, 'BAD_SHEET', 'ลิงก์ชีทไม่ถูกต้อง ให้คัดลอกลิงก์จากแถบที่อยู่ของ Google Sheets')
     if (!next.title) throw vtError(400, 'BAD_TITLE', 'กรุณาใส่ชื่อกิจกรรม')
     if (next.endsAt && isNaN(new Date(next.endsAt).getTime())) throw vtError(400, 'BAD_DATE', 'วันปิดโหวตไม่ถูกต้อง')
-
-    let detected
-    try {
-      detected = describeEvent(next)
-    } catch (err) {
-      if (err && err.vt) throw err
-      throw vtError(400, 'SHEET_UNREADABLE', 'เปิดชีทนี้ไม่ได้ ตรวจว่าแชร์สิทธิ์แก้ไขให้บัญชีที่ดูแลสคริปต์แล้ว')
+    if (prev && (prev.source !== next.source || prev.sheetUrl !== next.sheetUrl) && readVotes(prev).length) {
+      throw vtError(409, 'HAS_VOTES', 'กิจกรรมนี้มีคนโหวตแล้ว เปลี่ยนแหล่งผลงานไม่ได้ ให้สร้างกิจกรรมใหม่แทน')
     }
-    if (!detected.columns.image) throw vtError(400, 'NO_IMAGE_COLUMN', 'ไม่พบคอลัมน์ลิงก์รูปภาพจาก Google Drive ในแท็บนี้')
-    PropertiesService.getScriptProperties().setProperty('CONFIG', JSON.stringify(next))
-    CacheService.getScriptCache().remove(entriesCacheKey(next))
-    return { config: next, detected: detected }
+
+    let detected = null
+    if (next.source === 'sheet') {
+      if (!parseSheetUrl(next.sheetUrl).id) throw vtError(400, 'BAD_SHEET', 'ลิงก์ชีทไม่ถูกต้อง ให้คัดลอกลิงก์จากแถบที่อยู่ของ Google Sheets')
+      try {
+        detected = describeEvent(next)
+      } catch (err) {
+        if (err && err.vt) throw err
+        throw vtError(400, 'SHEET_UNREADABLE', 'เปิดชีทนี้ไม่ได้ ตรวจว่าแชร์สิทธิ์แก้ไขให้บัญชีที่ดูแลสคริปต์แล้ว')
+      }
+      if (!detected.columns.image) throw vtError(400, 'NO_IMAGE_COLUMN', 'ไม่พบคอลัมน์ลิงก์รูปภาพจาก Google Drive ในแท็บนี้')
+    }
+    writeCampaign(next)
+    clearEntriesCache(next)
+    return { campaign: next, detected: detected }
+  },
+
+  activateCampaign: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    PropertiesService.getScriptProperties().setProperty('ACTIVE_CAMPAIGN', cfg.id)
+    return { campaign: publicCampaign(cfg) }
+  },
+
+  addEntry: (body) => {
+    const admin = requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    if (cfg.source !== 'app') throw vtError(400, 'WRONG_SOURCE', 'กิจกรรมนี้ดึงผลงานจากชีท เพิ่มรูปในแอปไม่ได้')
+    const title = cleanSpaces(body.title)
+    const author = cleanSpaces(body.author)
+    if (!title) throw vtError(400, 'BAD_TITLE', 'กรุณาใส่ชื่อผลงาน')
+    if (!author) throw vtError(400, 'BAD_AUTHOR', 'กรุณาใส่ชื่อเจ้าของผลงาน')
+
+    const m = String(body.image || '').match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/)
+    if (!m) throw vtError(400, 'BAD_IMAGE', 'ไฟล์รูปไม่ถูกต้อง รองรับ JPG, PNG, WEBP')
+    const bytes = Utilities.base64Decode(m[2])
+    if (bytes.length > MAX_UPLOAD_BYTES) throw vtError(413, 'TOO_LARGE', 'รูปใหญ่เกิน 4MB')
+    const file = uploadFolder().createFile(Utilities.newBlob(bytes, m[1], cfg.id + '-' + Date.now() + '.jpg'))
+
+    const entry = {
+      id: file.getId(),
+      title: title,
+      author: author,
+      imageId: file.getId(),
+      width: Number(body.width) || null,
+      height: Number(body.height) || null,
+    }
+    appendDataRow('ENTRIES', [cfg.id, entry.id, entry.title, entry.author, entry.imageId, String(entry.width || ''), String(entry.height || ''), nowText(), displayName(admin)])
+    clearEntriesCache(cfg)
+    return { entry: Object.assign({ votes: 0 }, entry) }
+  },
+
+  deleteEntry: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    if (cfg.source !== 'app') throw vtError(400, 'WRONG_SOURCE', 'ผลงานของกิจกรรมนี้อยู่ในชีท ให้ลบที่ชีทแทน')
+    const entryId = String(body.entryId)
+    if (readVotes(cfg).some((v) => v.entryId === entryId)) throw vtError(409, 'HAS_VOTES', 'ผลงานนี้มีคนโหวตแล้ว ลบไม่ได้')
+    const sh = dataBook().getSheetByName('ENTRIES')
+    const rows = sh.getDataRange().getDisplayValues()
+    const i = rows.findIndex((r, k) => k > 0 && r[0] === cfg.id && r[1] === entryId)
+    if (i < 1) throw vtError(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้')
+    sh.deleteRow(i + 1)
+    try {
+      DriveApp.getFileById(rows[i][4]).setTrashed(true)
+    } catch (_) {
+      /* file already gone */
+    }
+    clearEntriesCache(cfg)
+    return { entryId: entryId }
+  },
+
+  employees: (body) => {
+    requireAdmin(body)
+    const users = getUsers()
+    return {
+      employees: Object.keys(users)
+        .map((k) => ({ empId: users[k].empId, display: displayName(users[k]), dept: users[k].dept }))
+        .sort((a, b) => a.display.localeCompare(b.display, 'th')),
+    }
+  },
+
+  admins: (body) => {
+    requireAdmin(body)
+    return { admins: adminList() }
+  },
+
+  saveAdmins: (body) => {
+    const me = requireAdmin(body)
+    const users = getUsers()
+    const known = {}
+    Object.keys(users).forEach((k) => (known[users[k].empId] = 1))
+    const ids = (body.empIds || []).map((x) => String(x).trim()).filter((x, i, a) => x && a.indexOf(x) === i)
+    const unknown = ids.filter((x) => !known[x])
+    if (unknown.length) throw vtError(400, 'UNKNOWN_EMPLOYEE', 'ไม่พบรหัสพนักงาน ' + unknown.join(', ') + ' ในรายชื่อที่ลงทะเบียน LINE HR')
+    if (ids.indexOf(me.empId) === -1) throw vtError(400, 'SELF_REMOVE', 'ลบตัวเองออกจากผู้ดูแลไม่ได้')
+    PropertiesService.getScriptProperties().setProperty('ADMINS', JSON.stringify(ids))
+    return { admins: adminList() }
   },
 }
 
@@ -273,7 +378,19 @@ function requireAdmin(body) {
   return u
 }
 
-const isAdmin = (u) => ADMIN_EMP_IDS.indexOf(String(u.empId)) !== -1
+function adminIds() {
+  const raw = PropertiesService.getScriptProperties().getProperty('ADMINS')
+  return raw ? JSON.parse(raw) : SEED_ADMIN_EMP_IDS
+}
+
+const isAdmin = (u) => adminIds().indexOf(String(u.empId)) !== -1
+
+function adminList() {
+  const users = getUsers()
+  const byEmp = {}
+  Object.keys(users).forEach((k) => (byEmp[users[k].empId] = users[k]))
+  return adminIds().map((id) => ({ empId: id, display: byEmp[id] ? displayName(byEmp[id]) : '(ไม่พบในรายชื่อ)' }))
+}
 
 /* ───────────── users (LINE_USERS) ───────────── */
 
@@ -362,25 +479,168 @@ function displayName(u) {
   return u.name || u.nick || ''
 }
 
-/* ───────────── event sheet ───────────── */
+/* ───────────── data book (VOTE TOGETHER Data) ───────────── */
 
+function dataBook() {
+  const props = PropertiesService.getScriptProperties()
+  const id = props.getProperty('DATA_SHEET_ID')
+  let ss = null
+  if (id) {
+    try {
+      ss = SpreadsheetApp.openById(id)
+    } catch (_) {
+      ss = null
+    }
+  }
+  if (!ss) {
+    ss = SpreadsheetApp.create('VOTE TOGETHER Data')
+    props.setProperty('DATA_SHEET_ID', ss.getId())
+  }
+  Object.keys(DATA_TABS).forEach((name) => {
+    if (ss.getSheetByName(name)) return
+    const sh = ss.insertSheet(name)
+    sh.getRange(1, 1, 1, DATA_TABS[name].length).setNumberFormat('@').setValues([DATA_TABS[name]]).setFontWeight('bold')
+    sh.setFrozenRows(1)
+  })
+  ss.getSheets()
+    .filter((s) => !DATA_TABS[s.getName()])
+    .forEach((s) => s.getLastRow() === 0 && ss.getSheets().length > 1 && ss.deleteSheet(s))
+  return ss
+}
+
+function readDataTab(name) {
+  const sh = dataBook().getSheetByName(name)
+  if (sh.getLastRow() < 2) return []
+  return sh.getRange(2, 1, sh.getLastRow() - 1, DATA_TABS[name].length).getDisplayValues()
+}
+
+function appendDataRow(name, row) {
+  const sh = dataBook().getSheetByName(name)
+  sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@').setValues([row.map(String)])
+  SpreadsheetApp.flush()
+}
+
+function uploadFolder() {
+  const props = PropertiesService.getScriptProperties()
+  const id = props.getProperty('UPLOAD_FOLDER_ID')
+  if (id) {
+    try {
+      return DriveApp.getFolderById(id)
+    } catch (_) {
+      /* recreate below */
+    }
+  }
+  const parents = DriveApp.getFileById(dataBook().getId()).getParents()
+  const parent = parents.hasNext() ? parents.next() : DriveApp.getRootFolder()
+  const folder = parent.createFolder('VOTE TOGETHER Uploads')
+  props.setProperty('UPLOAD_FOLDER_ID', folder.getId())
+  return folder
+}
+
+/* ───────────── campaigns ───────────── */
+
+function newId(prefix) {
+  return prefix + Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyMMddHHmmss') + Math.floor(Math.random() * 90 + 10)
+}
+
+function listCampaigns() {
+  const cache = CacheService.getScriptCache()
+  const hit = cache.get('campaigns')
+  if (hit) return JSON.parse(hit)
+
+  let rows = readDataTab('CAMPAIGNS')
+  if (!rows.length) {
+    // ครั้งแรก: ย้ายกิจกรรมเดิม (ตั้งค่าแบบชีท) เข้ามาเป็นกิจกรรมแรก
+    const raw = PropertiesService.getScriptProperties().getProperty('CONFIG')
+    const old = raw ? JSON.parse(raw) : DEFAULT_EVENT
+    const first = Object.assign({}, old, { id: newId('c'), source: 'sheet', createdAt: nowText(), createdBy: 'ระบบ' })
+    writeCampaign(first)
+    PropertiesService.getScriptProperties().setProperty('ACTIVE_CAMPAIGN', first.id)
+    rows = readDataTab('CAMPAIGNS')
+  }
+  const list = rows
+    .filter((r) => r[0])
+    .map((r) => ({
+      id: r[0],
+      title: r[1],
+      subtitle: r[2],
+      endsAt: r[3],
+      showCounts: r[4] === 'yes',
+      source: r[5] === 'sheet' ? 'sheet' : 'app',
+      sheetUrl: r[6],
+      createdAt: r[7],
+      createdBy: r[8],
+    }))
+    .reverse()
+  cache.put('campaigns', JSON.stringify(list), 120)
+  return list
+}
+
+function writeCampaign(c) {
+  const row = [c.id, c.title, c.subtitle, c.endsAt, c.showCounts ? 'yes' : 'no', c.source, c.sheetUrl || '', c.createdAt, c.createdBy]
+  const sh = dataBook().getSheetByName('CAMPAIGNS')
+  const ids = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues().map((r) => r[0]) : []
+  const at = ids.indexOf(c.id)
+  if (at === -1) appendDataRow('CAMPAIGNS', row)
+  else sh.getRange(at + 2, 1, 1, row.length).setNumberFormat('@').setValues([row.map(String)])
+  CacheService.getScriptCache().remove('campaigns')
+}
+
+function campaignById(id) {
+  const c = listCampaigns().find((x) => x.id === String(id))
+  if (!c) throw vtError(404, 'CAMPAIGN_NOT_FOUND', 'ไม่พบกิจกรรมนี้')
+  return c
+}
+
+// กิจกรรมที่เปิดใช้อยู่ตอนนี้
 function getConfig() {
-  const raw = PropertiesService.getScriptProperties().getProperty('CONFIG')
-  return raw ? JSON.parse(raw) : DEFAULT_EVENT
+  const list = listCampaigns()
+  const active = PropertiesService.getScriptProperties().getProperty('ACTIVE_CAMPAIGN')
+  return list.find((c) => c.id === active) || list[0]
 }
 
 function publicCampaign(cfg) {
   return {
-    id: parseSheetUrl(cfg.sheetUrl).id,
+    id: cfg.id,
     title: cfg.title,
     subtitle: cfg.subtitle,
     endsAt: cfg.endsAt || null,
     showCounts: Boolean(cfg.showCounts),
+    source: cfg.source,
     closed: isClosed(cfg),
   }
 }
 
 const isClosed = (cfg) => Boolean(cfg.endsAt) && Date.now() > new Date(cfg.endsAt).getTime()
+
+/* ───────────── entries ───────────── */
+
+const entriesCacheKey = (cfg) =>
+  cfg.source === 'app' ? 'entries:app:' + cfg.id : 'entries:' + Utilities.base64EncodeWebSafe(cfg.sheetUrl).slice(-60)
+
+function clearEntriesCache(cfg) {
+  CacheService.getScriptCache().remove(entriesCacheKey(cfg))
+}
+
+function readEntries(cfg) {
+  const cache = CacheService.getScriptCache()
+  const key = entriesCacheKey(cfg)
+  const hit = cache.get(key)
+  if (hit) return JSON.parse(hit)
+  const entries = cfg.source === 'app' ? readAppEntries(cfg) : readSheetEntries(cfg)
+  try {
+    cache.put(key, JSON.stringify(entries), 120)
+  } catch (_) {
+    /* too many entries for one cache value */
+  }
+  return entries
+}
+
+function readAppEntries(cfg) {
+  return readDataTab('ENTRIES')
+    .filter((r) => r[0] === cfg.id && r[1])
+    .map((r) => ({ id: r[1], title: r[2], author: r[3], imageId: r[4], width: Number(r[5]) || null, height: Number(r[6]) || null }))
+}
 
 function parseSheetUrl(url) {
   const id = (String(url).match(/\/d\/([-\w]{20,})/) || [])[1] || ''
@@ -422,14 +682,7 @@ function describeEvent(cfg) {
   return { spreadsheet: t.ss.getName(), tab: t.sh.getName(), entryCount: count, columns: cols }
 }
 
-const entriesCacheKey = (cfg) => 'entries:' + Utilities.base64EncodeWebSafe(cfg.sheetUrl).slice(-60)
-
-function readEntries(cfg) {
-  const cache = CacheService.getScriptCache()
-  const key = entriesCacheKey(cfg)
-  const hit = cache.get(key)
-  if (hit) return JSON.parse(hit)
-
+function readSheetEntries(cfg) {
   const values = eventSheet(cfg).sh.getDataRange().getDisplayValues()
   const rows = values.slice(1)
   const idx = detectColumns(values[0] || [], rows)._idx
@@ -448,18 +701,18 @@ function readEntries(cfg) {
       imageId: imageId,
     })
   })
-
   const meta = driveMeta(entries.map((e) => e.imageId))
   entries.forEach((e) => {
     const m = meta[e.imageId] || {}
     e.width = m.w || null
     e.height = m.h || null
   })
-  cache.put(key, JSON.stringify(entries), 120)
   return entries
 }
 
-function votesSheet(cfg) {
+/* ───────────── votes ───────────── */
+
+function eventVotesSheet(cfg) {
   const ss = eventSheet(cfg).ss
   let sh = ss.getSheetByName(VOTES_TAB)
   if (!sh) {
@@ -471,13 +724,26 @@ function votesSheet(cfg) {
 }
 
 function readVotes(cfg) {
+  const toVote = (r) => ({ time: r[0], uid: r[1], empId: r[2], name: r[3], entryId: r[4], title: r[5] })
+  if (cfg.source === 'app') {
+    return readDataTab('VOTES')
+      .filter((r) => r[0] === cfg.id && r[2])
+      .map((r) => toVote(r.slice(1)))
+  }
   const sh = eventSheet(cfg).ss.getSheetByName(VOTES_TAB)
   if (!sh || sh.getLastRow() < 2) return []
   return sh
     .getRange(2, 1, sh.getLastRow() - 1, VOTES_HEADER.length)
     .getDisplayValues()
     .filter((r) => r[1])
-    .map((r) => ({ time: r[0], uid: r[1], empId: r[2], name: r[3], entryId: r[4], title: r[5] }))
+    .map(toVote)
+}
+
+function appendVote(cfg, row) {
+  if (cfg.source === 'app') return appendDataRow('VOTES', [cfg.id].concat(row))
+  const sh = eventVotesSheet(cfg)
+  sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@').setValues([row])
+  SpreadsheetApp.flush()
 }
 
 function votedEntryOf(cfg, uid) {
@@ -491,9 +757,10 @@ function countVotes(votes) {
 
 /* ───────────── Drive images (served only through this script) ───────────── */
 
-function allowedImageIds(u) {
+function allowedImageIds(u, campaignId) {
   const ids = {}
   readEntries(getConfig()).forEach((e) => (ids[e.imageId] = 1))
+  if (campaignId && isAdmin(u)) readEntries(campaignById(campaignId)).forEach((e) => (ids[e.imageId] = 1))
   if (u.photoId) ids[u.photoId] = 1
   return ids
 }
@@ -545,22 +812,30 @@ function loadImages(ids, size) {
   })
   if (!missing.length) return out
 
-  const links = UrlFetchApp.fetchAll(missing.map((id) => driveApi('files/' + id + '?supportsAllDrives=true&fields=thumbnailLink')))
+  const links = UrlFetchApp.fetchAll(missing.map((id) => driveApi('files/' + id + '?supportsAllDrives=true&fields=thumbnailLink,size')))
   const want = []
+  const direct = []
   links.forEach((r, k) => {
     if (r.getResponseCode() !== 200) return
-    const link = JSON.parse(r.getContentText()).thumbnailLink
-    if (link) want.push({ id: missing[k], url: link.replace(/=s\d+$/, '=' + IMAGE_SIZES[size]) })
+    const d = JSON.parse(r.getContentText())
+    if (d.thumbnailLink) want.push({ id: missing[k], url: d.thumbnailLink.replace(/=s\d+$/, '=' + IMAGE_SIZES[size]) })
+    else if (Number(d.size) < 1500000) direct.push(missing[k]) // รูปเพิ่งอัปโหลด Drive ยังทำ thumbnail ไม่เสร็จ
   })
   const blobs = UrlFetchApp.fetchAll(
     want.map((w) => ({ url: w.url, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true })),
   )
-  blobs.forEach((r, k) => {
-    if (r.getResponseCode() !== 200) return
-    const blob = r.getBlob()
+  const put = (id, blob, cacheIt) => {
     const dataUrl = 'data:' + (blob.getContentType() || 'image/jpeg') + ';base64,' + Utilities.base64Encode(blob.getBytes())
-    out[want[k].id] = dataUrl
-    putChunks('img:' + size + ':' + want[k].id, dataUrl, 21600)
+    out[id] = dataUrl
+    if (cacheIt) putChunks('img:' + size + ':' + id, dataUrl, 21600)
+  }
+  blobs.forEach((r, k) => r.getResponseCode() === 200 && put(want[k].id, r.getBlob(), true))
+  direct.forEach((id) => {
+    try {
+      put(id, DriveApp.getFileById(id).getBlob(), false)
+    } catch (_) {
+      /* unreadable file */
+    }
   })
   return out
 }

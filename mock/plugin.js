@@ -22,7 +22,7 @@ const PALETTES = [
   ['#25183F', '#B89CFF', '#FF8D9C', '#F8F9FF'], ['#0F1E2E', '#55C7FF', '#7657FF', '#FFD38A'],
 ]
 
-const entries = SHAPES.map(([width, height], i) => ({
+const sheetEntries = SHAPES.map(([width, height], i) => ({
   id: `img${i + 1}`,
   title: TITLES[i][0],
   author: TITLES[i][1],
@@ -30,41 +30,63 @@ const entries = SHAPES.map(([width, height], i) => ({
   width,
   height,
 }))
-const votes = []
+const uploads = new Map() // imageId -> dataUrl for in-app uploads
+const votes = [] // { campaignId, uid, entryId }
 const sessions = new Map()
 
 // Mirrors LINE_USERS: only registered userIds can log in.
 const USERS = {
-  'U-dev-admin': { uid: 'U-dev-admin', empId: '90001', name: 'ทดสอบ แอดมิน', nick: 'แอด', branch: 'HQ', dept: 'ทรัพยากรบุคคล', avatarId: 'av1', role: 'admin' },
-  'U-dev-voter': { uid: 'U-dev-voter', empId: '90002', name: 'ทดสอบ พนักงาน', nick: 'โหวต', branch: 'W1', dept: 'ขาย', avatarId: 'av2', role: 'voter' },
+  'U-dev-admin': { uid: 'U-dev-admin', empId: '90001', name: 'ทดสอบ แอดมิน', nick: 'แอด', branch: 'HQ', dept: 'ทรัพยากรบุคคล', avatarId: 'av1' },
+  'U-dev-voter': { uid: 'U-dev-voter', empId: '90002', name: 'ทดสอบ พนักงาน', nick: 'โหวต', branch: 'W1', dept: 'ขาย', avatarId: 'av2' },
 }
+let adminIds = ['90001']
+const display = (u) => `${u.name} (${u.nick})`
+const isAdmin = (u) => adminIds.includes(u.empId)
 const profile = (u) => ({
   id: u.uid,
   empId: u.empId,
   name: u.name,
   nick: u.nick,
-  display: `${u.name} (${u.nick})`,
+  display: display(u),
   branch: u.branch,
   dept: u.dept,
   avatarId: u.avatarId,
-  role: u.role,
+  role: isAdmin(u) ? 'admin' : 'voter',
 })
 
-let config = {
-  sheetUrl: 'https://docs.google.com/spreadsheets/d/MOCK-SHEET-ID-0000000000/edit?gid=0',
-  title: 'HALLOWEEN 2026 หลอนให้สุด แล้วหยุดที่ความปัง',
-  subtitle: 'โหวตภาพชุดฮาโลวีนที่ปังที่สุด เลือกได้ 1 ภาพต่อ 1 บัญชี LINE',
-  endsAt: '',
-  showCounts: true,
+const campaigns = [
+  {
+    id: 'c-halloween',
+    title: 'HALLOWEEN 2026 หลอนให้สุด แล้วหยุดที่ความปัง',
+    subtitle: 'โหวตภาพชุดฮาโลวีนที่ปังที่สุด เลือกได้ 1 ภาพต่อ 1 บัญชี LINE',
+    endsAt: '',
+    showCounts: true,
+    source: 'sheet',
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/MOCK-SHEET-ID-0000000000/edit?gid=0',
+    createdAt: '2026-10-28 10:00:00',
+    createdBy: 'ระบบ',
+    entries: sheetEntries,
+  },
+]
+let activeId = 'c-halloween'
+const active = () => campaigns.find((c) => c.id === activeId)
+const byId = (id) => {
+  const c = campaigns.find((x) => x.id === id)
+  if (!c) throw new Fail(404, 'CAMPAIGN_NOT_FOUND', 'ไม่พบกิจกรรมนี้')
+  return c
 }
-const detected = () => ({
+const detected = (c) => ({
   spreadsheet: 'MOCK · คำตอบแบบฟอร์ม',
   tab: 'การตอบแบบฟอร์ม 1',
-  entryCount: entries.length,
+  entryCount: c.entries.length,
   columns: { title: 'ชื่อภาพ สโลแกน แคปชั่น', fullName: 'ชื่อจริง - นามสกุล', nick: 'ชื่อเล่น', image: 'อัพโหลดภาพถ่ายในชุดฮาโลวีน' },
 })
-const closed = () => Boolean(config.endsAt) && Date.now() > new Date(config.endsAt).getTime()
-const countOf = (id) => votes.filter((v) => v.entryId === id).length
+const isClosed = (c) => Boolean(c.endsAt) && Date.now() > new Date(c.endsAt).getTime()
+const votesOf = (c) => votes.filter((v) => v.campaignId === c.id)
+const countOf = (c, id) => votesOf(c).filter((v) => v.entryId === id).length
+const pub = (c) => ({ id: c.id, title: c.title, subtitle: c.subtitle, endsAt: c.endsAt || null, showCounts: c.showCounts, source: c.source, closed: isClosed(c) })
+const strip = ({ entries, ...c }) => c
+const now = () => new Date().toISOString().replace('T', ' ').slice(0, 19)
 
 function art(id) {
   const i = Number(id.replace(/\D/g, '')) - 1 + (id.startsWith('av') ? 6 : 0)
@@ -130,59 +152,131 @@ ${btn('LINE ที่ยังไม่ลงทะเบียนพนัก�
 }
 
 const requireAdmin = (u) => {
-  if (u.role !== 'admin') throw new Fail(403, 'FORBIDDEN', 'สำหรับผู้ดูแลกิจกรรมเท่านั้น')
+  if (!isAdmin(u)) throw new Fail(403, 'FORBIDDEN', 'สำหรับผู้ดูแลกิจกรรมเท่านั้น')
 }
+const imageData = (id) => uploads.get(id) || svgData(id)
 
 const actions = {
-  campaign: () => ({
-    campaign: { id: 'mock', title: config.title, subtitle: config.subtitle, endsAt: config.endsAt || null, showCounts: config.showCounts, closed: closed() },
-  }),
+  campaign: () => ({ campaign: pub(active()) }),
   login: (b) => {
     const idToken = String(b.idToken || '')
     if (!idToken.startsWith('mock-')) throw new Fail(401, 'LINE_VERIFY_FAILED', 'ยืนยันตัวตนกับ LINE ไม่สำเร็จ หรือหมดอายุ กรุณาเข้าสู่ระบบใหม่')
     const u = USERS[idToken.slice(5)]
-    if (!u) throw new Fail(403, 'NOT_REGISTERED', 'บัญชี LINE นี้ยังไม่ได้ลงทะเบียนพนักงาน กรุณาลงทะเบียนผ่าน LINE OA ของบริษัทก่อน')
+    if (!u) throw new Fail(403, 'NOT_REGISTERED', 'ไม่พบบัญชี LINE “ผู้ทดสอบ” ในรายชื่อพนักงานที่ลงทะเบียนกับ LINE HR ถ้าเพิ่งเปลี่ยนชื่อหรือรูปโปรไฟล์ LINE แจ้งผู้ดูแลกิจกรรมได้เลย')
     const token = randomBytes(16).toString('hex')
     sessions.set(token, u.uid)
-    return { token, user: profile(u), votedEntryId: votes.find((v) => v.uid === u.uid)?.entryId ?? null }
+    return { token, user: profile(u), votedEntryId: votesOf(active()).find((v) => v.uid === u.uid)?.entryId ?? null }
   },
-  me: (b, u) => ({ user: profile(u), votedEntryId: votes.find((v) => v.uid === u.uid)?.entryId ?? null }),
-  entries: (b, u) => ({
-    entries: entries.map((e) => ({ ...e, votes: config.showCounts || u.role === 'admin' ? countOf(e.id) : undefined })),
-  }),
-  images: (b) => ({ images: Object.fromEntries((b.ids || []).slice(0, 8).map((id) => [id, svgData(id)])) }),
+  me: (b, u) => ({ user: profile(u), votedEntryId: votesOf(active()).find((v) => v.uid === u.uid)?.entryId ?? null }),
+  entries: (b, u) => {
+    const c = active()
+    return { entries: c.entries.map((e) => ({ ...e, votes: c.showCounts || isAdmin(u) ? countOf(c, e.id) : undefined })) }
+  },
+  images: (b) => ({ images: Object.fromEntries((b.ids || []).slice(0, 8).map((id) => [id, imageData(id)])) }),
   vote: async (b, u) => {
     await wait(500)
+    const c = active()
     if (b.mockFail) throw new Fail(503, 'BUSY', 'ระบบบันทึกคะแนนไม่สำเร็จ กรุณาลองอีกครั้ง')
-    if (closed()) throw new Fail(403, 'CLOSED', 'ปิดรับโหวตแล้ว')
-    const entry = entries.find((e) => e.id === b.entryId)
+    if (isClosed(c)) throw new Fail(403, 'CLOSED', 'ปิดรับโหวตแล้ว')
+    const entry = c.entries.find((e) => e.id === b.entryId)
     if (!entry) throw new Fail(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้')
-    const mine = votes.find((v) => v.uid === u.uid)
+    const mine = votesOf(c).find((v) => v.uid === u.uid)
     if (mine) throw new Fail(409, 'ALREADY_VOTED', 'บัญชีนี้โหวตไปแล้ว', { votedEntryId: mine.entryId })
-    votes.push({ uid: u.uid, entryId: entry.id })
-    return { entryId: entry.id, votes: config.showCounts ? countOf(entry.id) : undefined }
+    votes.push({ campaignId: c.id, uid: u.uid, entryId: entry.id })
+    return { entryId: entry.id, votes: c.showCounts ? countOf(c, entry.id) : undefined }
   },
   stats: (b, u) => {
     requireAdmin(u)
+    const c = b.campaignId ? byId(b.campaignId) : active()
+    const vs = votesOf(c)
     return {
-      totalVotes: votes.length,
-      voters: new Set(votes.map((v) => v.uid)).size,
+      campaign: pub(c),
+      totalVotes: vs.length,
+      voters: new Set(vs.map((v) => v.uid)).size,
       eligible: Object.keys(USERS).length,
       updatedAt: new Date().toISOString(),
-      entries: entries.map((e) => ({ id: e.id, title: e.title, author: e.author, imageId: e.imageId, votes: countOf(e.id) })),
+      entries: c.entries.map((e) => ({ id: e.id, title: e.title, author: e.author, imageId: e.imageId, votes: countOf(c, e.id) })),
     }
   },
-  getConfig: (b, u) => {
+  campaigns: (b, u) => {
     requireAdmin(u)
-    return { config, detected: detected() }
+    return { campaigns: [...campaigns].reverse().map((c) => ({ ...strip(c), active: c.id === activeId, closed: isClosed(c) })) }
   },
-  saveConfig: (b, u) => {
+  campaignEntries: (b, u) => {
     requireAdmin(u)
-    if (!/\/d\/[-\w]{20,}/.test(b.config?.sheetUrl || '')) {
+    const c = byId(b.campaignId)
+    return { entries: c.entries.map((e) => ({ ...e, votes: countOf(c, e.id) })), detected: c.source === 'sheet' ? detected(c) : null }
+  },
+  saveCampaign: (b, u) => {
+    requireAdmin(u)
+    const x = b.campaign || {}
+    const prev = x.id ? byId(x.id) : null
+    if (!String(x.title || '').trim()) throw new Fail(400, 'BAD_TITLE', 'กรุณาใส่ชื่อกิจกรรม')
+    const source = x.source === 'sheet' ? 'sheet' : 'app'
+    if (source === 'sheet' && !/\/d\/[-\w]{20,}/.test(x.sheetUrl || '')) {
       throw new Fail(400, 'BAD_SHEET', 'ลิงก์ชีทไม่ถูกต้อง ให้คัดลอกลิงก์จากแถบที่อยู่ของ Google Sheets')
     }
-    config = { ...config, ...b.config, showCounts: Boolean(b.config.showCounts) }
-    return { config, detected: detected() }
+    if (prev && prev.source !== source && votesOf(prev).length) {
+      throw new Fail(409, 'HAS_VOTES', 'กิจกรรมนี้มีคนโหวตแล้ว เปลี่ยนแหล่งผลงานไม่ได้ ให้สร้างกิจกรรมใหม่แทน')
+    }
+    const next = {
+      id: prev?.id || `c${Date.now()}`,
+      title: x.title.trim(),
+      subtitle: String(x.subtitle || '').trim(),
+      endsAt: x.endsAt || '',
+      showCounts: Boolean(x.showCounts),
+      source,
+      sheetUrl: source === 'sheet' ? x.sheetUrl : '',
+      createdAt: prev?.createdAt || now(),
+      createdBy: prev?.createdBy || display(u),
+      entries: prev && prev.source === source ? prev.entries : source === 'sheet' ? sheetEntries : [],
+    }
+    if (prev) Object.assign(prev, next)
+    else campaigns.push(next)
+    return { campaign: strip(next), detected: source === 'sheet' ? detected(next) : null }
+  },
+  activateCampaign: (b, u) => {
+    requireAdmin(u)
+    activeId = byId(b.campaignId).id
+    return { campaign: pub(active()) }
+  },
+  addEntry: async (b, u) => {
+    requireAdmin(u)
+    const c = byId(b.campaignId)
+    if (c.source !== 'app') throw new Fail(400, 'WRONG_SOURCE', 'กิจกรรมนี้ดึงผลงานจากชีท เพิ่มรูปในแอปไม่ได้')
+    if (!String(b.title || '').trim()) throw new Fail(400, 'BAD_TITLE', 'กรุณาใส่ชื่อผลงาน')
+    if (!String(b.author || '').trim()) throw new Fail(400, 'BAD_AUTHOR', 'กรุณาใส่ชื่อเจ้าของผลงาน')
+    if (!/^data:image\/(jpeg|png|webp);base64,/.test(b.image || '')) throw new Fail(400, 'BAD_IMAGE', 'ไฟล์รูปไม่ถูกต้อง รองรับ JPG, PNG, WEBP')
+    await wait(400)
+    const id = `up${Date.now()}${Math.floor(Math.random() * 1000)}`
+    uploads.set(id, b.image)
+    const entry = { id, title: b.title.trim(), author: b.author.trim(), imageId: id, width: b.width || null, height: b.height || null }
+    c.entries.push(entry)
+    return { entry: { ...entry, votes: 0 } }
+  },
+  deleteEntry: (b, u) => {
+    requireAdmin(u)
+    const c = byId(b.campaignId)
+    if (votesOf(c).some((v) => v.entryId === b.entryId)) throw new Fail(409, 'HAS_VOTES', 'ผลงานนี้มีคนโหวตแล้ว ลบไม่ได้')
+    c.entries = c.entries.filter((e) => e.id !== b.entryId)
+    return { entryId: b.entryId }
+  },
+  employees: (b, u) => {
+    requireAdmin(u)
+    return { employees: Object.values(USERS).map((x) => ({ empId: x.empId, display: display(x), dept: x.dept })) }
+  },
+  admins: (b, u) => {
+    requireAdmin(u)
+    return { admins: adminIds.map((id) => ({ empId: id, display: display(Object.values(USERS).find((x) => x.empId === id) || { name: '(ไม่พบ)', nick: '' }) })) }
+  },
+  saveAdmins: (b, u) => {
+    requireAdmin(u)
+    const ids = [...new Set((b.empIds || []).map(String))]
+    const unknown = ids.filter((id) => !Object.values(USERS).some((x) => x.empId === id))
+    if (unknown.length) throw new Fail(400, 'UNKNOWN_EMPLOYEE', `ไม่พบรหัสพนักงาน ${unknown.join(', ')} ในรายชื่อที่ลงทะเบียน LINE HR`)
+    if (!ids.includes(u.empId)) throw new Fail(400, 'SELF_REMOVE', 'ลบตัวเองออกจากผู้ดูแลไม่ได้')
+    adminIds = ids
+    return actions.admins(b, u)
   },
 }
 const PUBLIC = new Set(['campaign', 'login'])

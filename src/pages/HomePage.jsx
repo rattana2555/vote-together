@@ -33,11 +33,13 @@ export default function HomePage() {
   const loadEntries = useCallback(async () => {
     setLoadError('')
     try {
-      setEntries(await api.entries())
+      const [list, me] = await Promise.all([api.entries(), api.me()])
+      setEntries(list)
+      setVotedEntryId(me.votedEntryId ?? null)
     } catch (err) {
       setLoadError(err.message)
     }
-  }, [])
+  }, [setVotedEntryId])
 
   useEffect(() => {
     if (user) loadEntries()

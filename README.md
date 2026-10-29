@@ -1,4 +1,4 @@
-# VOTE TOGETHER · v2.1
+# VOTE TOGETHER · v3.0
 
 **Your Vote. Our Moment.** — ทุกเสียงมีความหมาย ทุกการเลือกสร้างช่วงเวลาร่วมกัน
 
@@ -12,15 +12,16 @@
 เว็บ (GitHub Pages) ──LIFF──▶ LINE (ได้ ID token)
        │
        └─POST {action}─▶ Apps Script (gas/Code.gs)
-                           ├─ ยืนยัน ID token กับ LINE → ต้องมี userId ในแท็บ LINE_USERS (Rattana Users for apps)
-                           ├─ อ่านผลงานจากชีทกิจกรรม (เช่นชีทคำตอบ Google Form)
-                           ├─ ส่งรูปจาก Drive ผ่านสคริปต์ (ไฟล์ไม่ต้องแชร์สาธารณะ เห็นได้เฉพาะคนที่ login)
-                           └─ บันทึกโหวตในแท็บ VOTE_TOGETHER_VOTES ของชีทกิจกรรม (1 บัญชี LINE = 1 โหวต)
+                           ├─ ยืนยัน ID token กับ LINE → จับคู่พนักงานใน LINE_USERS ด้วยรูปโปรไฟล์/ชื่อ LINE
+                           ├─ กิจกรรมเก็บในชีท "VOTE TOGETHER Data" (แท็บ CAMPAIGNS · ENTRIES · VOTES)
+                           │    · แบบอัปโหลดในแอป: รูปอยู่ในโฟลเดอร์ "VOTE TOGETHER Uploads" คะแนนอยู่แท็บ VOTES
+                           │    · แบบ Google Sheet: อ่านผลงานจากชีทคำตอบ Form คะแนนอยู่แท็บ VOTE_TOGETHER_VOTES ของชีทนั้น
+                           └─ ส่งรูปจาก Drive ผ่านสคริปต์ (ไฟล์ไม่ต้องแชร์สาธารณะ เห็นได้เฉพาะคนที่ login)
 ```
 
 - ชื่อคนแสดงเป็น `ชื่อจริง (ชื่อเล่น)` เสมอ · รูปผู้ใช้มาจากคอลัมน์ N "รูปที่ส่ง (Drive)" ของ LINE_USERS
-- **เปลี่ยนกิจกรรม:** แอดมินไปที่หน้า "แดชบอร์ด" → "ตั้งค่ากิจกรรม" แล้ววางลิงก์ชีทใหม่ แอปจะหาคอลัมน์ชื่อภาพ, ชื่อจริง, ชื่อเล่น และลิงก์รูปเอง
-- แอดมิน = รหัสพนักงานใน `ADMIN_EMP_IDS` บนหัวไฟล์ `gas/Code.gs`
+- **สร้าง/เปลี่ยนกิจกรรม:** แดชบอร์ด → แท็บ "กิจกรรม" → "+ สร้างกิจกรรมใหม่" เลือกได้ว่าจะอัปโหลดรูปในแอปเลย หรือวางลิงก์ชีทคำตอบ Google Form แล้วกด "เปิดใช้กิจกรรมนี้" หน้าแรกเปลี่ยนทันที กิจกรรมเก่ายังดูผลย้อนหลังได้ในแท็บ "ผลโหวต"
+- **ผู้ดูแล:** แดชบอร์ด → แท็บ "ผู้ดูแล" เพิ่ม/นำออกด้วยรหัสพนักงาน (ตั้งต้น `SEED_ADMIN_EMP_IDS` ใน `gas/Code.gs`)
 
 ## ตั้งค่า (ทำครั้งเดียว)
 
@@ -51,14 +52,18 @@ npm run dev
 
 | action | ต้อง login | คืนค่า |
 |---|---|---|
-| `campaign` | – | `{ campaign: { title, subtitle, endsAt, showCounts, closed } }` |
+| `campaign` | – | `{ campaign: { id, title, subtitle, endsAt, showCounts, source, closed } }` (กิจกรรมที่เปิดใช้) |
 | `login` | – | `{ idToken }` → `{ token, user, votedEntryId }` |
 | `me` | ✓ | `{ user, votedEntryId }` |
 | `entries` | ✓ | `{ entries: [{ id, title, author, imageId, width, height, votes? }] }` |
 | `images` | ✓ | `{ ids, size: s\|l\|a }` → `{ images: { id: dataUrl } }` (เฉพาะรูปของกิจกรรมและรูปตัวเอง) |
 | `vote` | ✓ | `{ entryId }` → `{ entryId, votes? }` · 409 `ALREADY_VOTED` |
-| `stats` | แอดมิน | `{ totalVotes, voters, eligible, entries }` |
-| `getConfig` / `saveConfig` | แอดมิน | ตั้งค่าชีทกิจกรรม |
+| `stats` | แอดมิน | `{ campaignId? }` → `{ campaign, totalVotes, voters, eligible, entries }` |
+| `campaigns` / `campaignEntries` | แอดมิน | รายการกิจกรรม / ผลงานของกิจกรรม |
+| `saveCampaign` / `activateCampaign` | แอดมิน | สร้าง-แก้ไข / เปิดใช้กิจกรรม |
+| `addEntry` / `deleteEntry` | แอดมิน | อัปโหลดรูป (dataURL ≤ 4MB) / ลบผลงานที่ยังไม่มีคนโหวต |
+| `employees` · `admins` / `saveAdmins` | แอดมิน | รายชื่อพนักงาน · จัดการผู้ดูแล |
+| `health` | – | ตัวเลขสรุป ไม่มีข้อมูลส่วนตัว |
 
 ## กติกา UX ที่โค้ดบังคับไว้
 
