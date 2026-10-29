@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import Button from '../../components/Button.jsx'
 import { api } from '../../lib/api.js'
 import { shake, spring } from '../../lib/motion.js'
+import LineHrSettings from './LineHrSettings.jsx'
 
 export default function Admins({ me }) {
   const [admins, setAdmins] = useState(null)
@@ -98,6 +99,7 @@ export default function Admins({ me }) {
           )}
         </AnimatePresence>
       </div>
+      <LineHrSettings />
     </div>
   )
 }

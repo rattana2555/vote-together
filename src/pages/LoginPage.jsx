@@ -4,13 +4,14 @@ import Logo3D from '../components/Logo3D.jsx'
 import AmbientScene from '../components/AmbientScene.jsx'
 import Button, { LineIcon } from '../components/Button.jsx'
 import Avatar from '../components/Avatar.jsx'
+import LinkPrompt from '../components/LinkPrompt.jsx'
 import { APP, isLoginConfigured } from '../config.js'
 import { navigate } from '../lib/router.js'
 import { page, rise, shake, stagger } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
 
 export default function LoginPage() {
-  const { user, login, loginError } = useSession()
+  const { user, login, loginError, pendingLink } = useSession()
   const [busy, setBusy] = useState(false)
   const [tries, setTries] = useState(0)
   const configured = isLoginConfigured()
@@ -45,7 +46,9 @@ export default function LoginPage() {
           กิจกรรมโหวตภายในบริษัทรัตนไพบูลย์ สำหรับพนักงานที่ลงทะเบียน LINE กับบริษัทแล้ว
         </motion.p>
 
-        {user ? (
+        {!user && pendingLink ? (
+          <LinkPrompt />
+        ) : user ? (
           <motion.div variants={rise} className="login-signed">
             <Avatar user={user} size={44} />
             <div>

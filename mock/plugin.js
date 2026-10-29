@@ -88,6 +88,14 @@ const pub = (c) => ({ id: c.id, title: c.title, subtitle: c.subtitle, endsAt: c.
 const strip = ({ entries, ...c }) => c
 const now = () => new Date().toISOString().replace('T', ' ').slice(0, 19)
 
+// LINE HR chat-code linking (mirrors gas/Code.gs startLinkByCode / claimLinkCode / checkLink)
+let lineHr = { webhookUrl: '', oaId: '' }
+const hrEnabled = () => Boolean(lineHr.webhookUrl && lineHr.oaId)
+const links = new Map() // LINE Login sub -> LINE_USERS uid
+const pendingCodes = new Map() // code -> sub
+const failedCodes = new Set()
+const linkTokens = new Map() // linkToken -> { sub, code }
+
 function art(id) {
   const i = Number(id.replace(/\D/g, '')) - 1 + (id.startsWith('av') ? 6 : 0)
   const [w, h] = id.startsWith('av') ? [400, 400] : SHAPES[i] ?? [1200, 1200]
@@ -146,6 +154,7 @@ a{display:block;text-align:center;padding:13px;border-radius:10px;text-decoratio
 <p>มีเฉพาะตอน <code>npm run dev</code> ของจริงจะเปิด LINE แล้วส่ง ID token ให้ backend ตรวจกับ LINE และแท็บ LINE_USERS</p>
 ${btn('พนักงาน (แอดมิน)', 'mock-U-dev-admin', 'ok')}
 ${btn('พนักงาน (ผู้โหวตทั่วไป)', 'mock-U-dev-voter', 'alt')}
+${btn('LINE ใหม่ที่ยังไม่เคยยืนยัน (ต้องส่งรหัสใน LINE HR)', 'mock-U-new-device', 'alt')}
 ${btn('LINE ที่ยังไม่ลงทะเบียนพนักงาน', 'mock-U-not-registered', 'no')}
 <a class="no" href="${back({ error: 'access_denied' })}">ยกเลิก</a>
 </div></body></html>`
@@ -161,11 +170,40 @@ const actions = {
   login: (b) => {
     const idToken = String(b.idToken || '')
     if (!idToken.startsWith('mock-')) throw new Fail(401, 'LINE_VERIFY_FAILED', 'ยืนยันตัวตนกับ LINE ไม่สำเร็จ หรือหมดอายุ กรุณาเข้าสู่ระบบใหม่')
-    const u = USERS[idToken.slice(5)]
+    const sub = idToken.slice(5)
+    const u = USERS[sub] || USERS[links.get(sub)]
+    if (!u && hrEnabled()) {
+      const code = String(Math.floor(100000 + Math.random() * 900000))
+      const linkToken = randomBytes(12).toString('hex')
+      pendingCodes.set(code, sub)
+      linkTokens.set(linkToken, { sub, code })
+      return { needsLink: true, code: `VT-${code}`, oaId: lineHr.oaId, lineName: 'ผู้ทดสอบ LINE ใหม่', linkToken }
+    }
     if (!u) throw new Fail(403, 'NOT_REGISTERED', 'ไม่พบบัญชี LINE “ผู้ทดสอบ” ในรายชื่อพนักงานที่ลงทะเบียนกับ LINE HR ถ้าเพิ่งเปลี่ยนชื่อหรือรูปโปรไฟล์ LINE แจ้งผู้ดูแลกิจกรรมได้เลย')
     const token = randomBytes(16).toString('hex')
     sessions.set(token, u.uid)
     return { token, user: profile(u), votedEntryId: votesOf(active()).find((v) => v.uid === u.uid)?.entryId ?? null }
+  },
+  checkLink: (b) => {
+    const t = linkTokens.get(b.linkToken)
+    if (!t) throw new Fail(401, 'LINK_EXPIRED', 'รหัสยืนยันหมดอายุ กรุณาเข้าสู่ระบบใหม่')
+    if (failedCodes.has(t.code)) throw new Fail(403, 'NOT_REGISTERED', 'บัญชี LINE ที่ส่งรหัสยังไม่ได้ลงทะเบียนพนักงานกับ LINE HR กรุณาลงทะเบียนก่อน')
+    const u = USERS[links.get(t.sub)]
+    if (!u) return { linked: false }
+    const token = randomBytes(16).toString('hex')
+    sessions.set(token, u.uid)
+    return { linked: true, token, user: profile(u), votedEntryId: votesOf(active()).find((v) => v.uid === u.uid)?.entryId ?? null }
+  },
+  getLineHr: (b, u) => {
+    requireAdmin(u)
+    return { lineHr: { ...lineHr, enabled: hrEnabled(), receiverUrl: 'https://script.google.com/macros/s/MOCK-VOTE-TOGETHER/exec' } }
+  },
+  saveLineHr: (b, u) => {
+    requireAdmin(u)
+    if (b.webhookUrl && !/^https:\/\/\S+$/.test(b.webhookUrl)) throw new Fail(400, 'BAD_URL', 'Webhook URL ต้องขึ้นต้นด้วย https://')
+    if (b.oaId && !/^@[\w.\-]+$/.test(b.oaId)) throw new Fail(400, 'BAD_OA', 'LINE ID ของ LINE HR ต้องขึ้นต้นด้วย @ เช่น @123abcde')
+    lineHr = { webhookUrl: b.webhookUrl || '', oaId: b.oaId || '' }
+    return actions.getLineHr(b, u)
   },
   me: (b, u) => ({ user: profile(u), votedEntryId: votesOf(active()).find((v) => v.uid === u.uid)?.entryId ?? null }),
   entries: (b, u) => {
@@ -279,7 +317,7 @@ const actions = {
     return actions.admins(b, u)
   },
 }
-const PUBLIC = new Set(['campaign', 'login'])
+const PUBLIC = new Set(['campaign', 'login', 'checkLink'])
 
 export default function mockBackend() {
   return {
@@ -288,6 +326,21 @@ export default function mockBackend() {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url, 'http://localhost')
+        if (url.pathname === '/mock-line/hr-chat') {
+          const code = (url.searchParams.get('code') || '').replace(/\D/g, '')
+          const as = url.searchParams.get('as')
+          if (as) {
+            const sub = pendingCodes.get(code)
+            if (sub) {
+              pendingCodes.delete(code)
+              if (USERS[as]) links.set(sub, as)
+              else failedCodes.add(code)
+            }
+            return send(res, 200, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;padding:24px">ส่งรหัส VT-${code} แล้ว (จำลอง) · <a href="javascript:history.go(-2)">กลับไปที่แอป</a></body>`, 'text/html; charset=utf-8')
+          }
+          const link = (who, label) => `<a style="display:block;margin:10px 0;padding:12px;border-radius:10px;background:#06C755;color:#fff;text-align:center;font-weight:700;text-decoration:none" href="?code=${code}&as=${who}">${label}</a>`
+          return send(res, 200, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;padding:24px;max-width:380px;margin:auto"><b style="background:#FFE7A3;padding:4px 8px;border-radius:6px;font-size:12px">DEV · จำลองแชท LINE HR</b><p>ข้อความที่จะส่ง: <b>VT-${code}</b></p>${link('U-dev-voter', 'ส่งในฐานะพนักงานที่ลงทะเบียนแล้ว')}${link('U-stranger', 'ส่งในฐานะ LINE ที่ไม่ได้ลงทะเบียน')}</body>`, 'text/html; charset=utf-8')
+        }
         if (url.pathname === '/mock-line/authorize') return send(res, 200, authorizePage(url.searchParams), 'text/html; charset=utf-8')
         if (url.pathname !== '/mock-api' || req.method !== 'POST') return next()
 

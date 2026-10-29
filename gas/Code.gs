@@ -12,7 +12,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v2.0'
+const VER = 'v2.1'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -55,6 +55,15 @@ function doPost(e) {
   } catch (_) {
     return json(failure(400, 'BAD_REQUEST', 'รูปแบบคำขอไม่ถูกต้อง'))
   }
+  // LINE HR ส่ง webhook มาที่นี่ (ถ้าตั้งค่าเชื่อม LINE HR แล้ว): ส่งต่อให้บอท HR ตัวเดิม และอ่านรหัสยืนยันตัวตน
+  if (Array.isArray(body.events) && body.destination) {
+    try {
+      handleLineHrWebhook(e.postData.contents, body)
+    } catch (err) {
+      console.error(err && err.stack ? err.stack : err)
+    }
+    return json({ ok: true })
+  }
   try {
     const fn = ACTIONS[body.action]
     if (!fn) return json(failure(404, 'NOT_FOUND', 'ไม่รู้จักคำสั่งนี้'))
@@ -95,21 +104,29 @@ const ACTIONS = {
 
   login: (body) => {
     const line = verifyLineIdToken(body.idToken)
-    const u = findEmployee(line)
-    if (!u) {
-      console.warn('login not matched sub=%s name=%s', line.sub, line.name)
-      throw vtError(
-        403,
-        'NOT_REGISTERED',
-        'ไม่พบบัญชี LINE “' + line.name + '” ในรายชื่อพนักงานที่ลงทะเบียนกับ LINE HR ถ้าเพิ่งเปลี่ยนชื่อหรือรูปโปรไฟล์ LINE แจ้งผู้ดูแลกิจกรรมได้เลย',
-      )
+    const hr = lineHrConfig()
+    const u = findEmployee(line, { guess: !hr.enabled })
+    if (u) return sessionFor(u)
+    if (hr.enabled) return startLinkByCode(line, hr)
+    console.warn('login not matched sub=%s name=%s', line.sub, line.name)
+    throw vtError(
+      403,
+      'NOT_REGISTERED',
+      'ไม่พบบัญชี LINE “' + line.name + '” ในรายชื่อพนักงานที่ลงทะเบียนกับ LINE HR ถ้าเพิ่งเปลี่ยนชื่อหรือรูปโปรไฟล์ LINE แจ้งผู้ดูแลกิจกรรมได้เลย',
+    )
+  },
+
+  // หน้าเว็บถามซ้ำระหว่างรอพนักงานส่งรหัสในแชท LINE HR
+  checkLink: (body) => {
+    const t = readSession(body.linkToken)
+    if (!t || !t.link) throw vtError(401, 'LINK_EXPIRED', 'รหัสยืนยันหมดอายุ กรุณาเข้าสู่ระบบใหม่')
+    const cache = CacheService.getScriptCache()
+    if (cache.get('lc-fail:' + t.code)) {
+      throw vtError(403, 'NOT_REGISTERED', 'บัญชี LINE ที่ส่งรหัสยังไม่ได้ลงทะเบียนพนักงานกับ LINE HR กรุณาลงทะเบียนก่อน')
     }
-    const exp = Date.now() + SESSION_HOURS * 3600 * 1000
-    return {
-      token: signSession({ uid: u.uid, exp: exp }),
-      user: profile(u),
-      votedEntryId: votedEntryOf(getConfig(), u.uid),
-    }
+    const hrUid = PropertiesService.getScriptProperties().getProperty('link:' + t.link)
+    const u = hrUid && getUsers()[hrUid]
+    return u ? Object.assign({ linked: true }, sessionFor(u)) : { linked: false }
   },
 
   me: (body) => {
@@ -304,6 +321,28 @@ const ACTIONS = {
     return { admins: adminList() }
   },
 
+  getLineHr: (body) => {
+    requireAdmin(body)
+    const hr = lineHrConfig()
+    return { lineHr: { webhookUrl: hr.webhookUrl, oaId: hr.oaId, enabled: hr.enabled, receiverUrl: ScriptApp.getService().getUrl() } }
+  },
+
+  saveLineHr: (body) => {
+    requireAdmin(body)
+    const webhookUrl = String(body.webhookUrl || '').trim()
+    const oaId = String(body.oaId || '').trim()
+    const own = ScriptApp.getService().getUrl()
+    if (webhookUrl && !/^https:\/\/\S+$/.test(webhookUrl)) throw vtError(400, 'BAD_URL', 'Webhook URL ต้องขึ้นต้นด้วย https://')
+    if (webhookUrl && deploymentKey(webhookUrl) === deploymentKey(own)) {
+      throw vtError(400, 'LOOP', 'ใส่ Webhook เดิมของบอท HR ไม่ใช่ URL ของ VOTE TOGETHER (จะวนส่งต่อไม่รู้จบ)')
+    }
+    if (oaId && !/^@[\w.\-]+$/.test(oaId)) throw vtError(400, 'BAD_OA', 'LINE ID ของ LINE HR ต้องขึ้นต้นด้วย @ เช่น @123abcde')
+    const props = PropertiesService.getScriptProperties()
+    props.setProperty('HR_WEBHOOK_URL', webhookUrl)
+    props.setProperty('HR_OA_ID', oaId)
+    return ACTIONS.getLineHr(body)
+  },
+
   saveAdmins: (body) => {
     const me = requireAdmin(body)
     const users = getUsers()
@@ -319,6 +358,70 @@ const ACTIONS = {
 }
 
 /* ───────────── auth ───────────── */
+
+function sessionFor(u) {
+  const exp = Date.now() + SESSION_HOURS * 3600 * 1000
+  return { token: signSession({ uid: u.uid, exp: exp }), user: profile(u), votedEntryId: votedEntryOf(getConfig(), u.uid) }
+}
+
+/* ───────────── เชื่อมกับ LINE HR (ได้ userId จริงจากแชท LINE HR) ─────────────
+ * LINE Login ของแอปอยู่คนละ provider กับ LINE HR จึงได้ userId คนละตัว
+ * ครั้งแรกระบบให้รหัส VT-xxxxxx → พนักงานส่งรหัสในแชท LINE HR → webhook ของ LINE HR ชี้มาที่สคริปต์นี้
+ * สคริปต์เห็น userId จริงของ LINE HR จากข้อความนั้น ผูกไว้ แล้วส่งต่อข้อความอื่นทั้งหมดให้บอท HR ตัวเดิม
+ */
+function lineHrConfig() {
+  const props = PropertiesService.getScriptProperties()
+  const webhookUrl = props.getProperty('HR_WEBHOOK_URL') || ''
+  const oaId = props.getProperty('HR_OA_ID') || ''
+  return { webhookUrl: webhookUrl, oaId: oaId, enabled: Boolean(webhookUrl && oaId) }
+}
+
+const deploymentKey = (url) => (String(url).match(/\/macros\/s\/([-\w]+)/) || [])[1] || String(url)
+
+function startLinkByCode(line, hr) {
+  const code = String(Math.floor(100000 + Math.random() * 900000))
+  CacheService.getScriptCache().put('lc:' + code, JSON.stringify({ sub: line.sub }), 900)
+  return {
+    needsLink: true,
+    code: 'VT-' + code,
+    oaId: hr.oaId,
+    lineName: line.name,
+    linkToken: signSession({ link: line.sub, code: code, exp: Date.now() + 15 * 60 * 1000 }),
+  }
+}
+
+function handleLineHrWebhook(raw, body) {
+  const hr = lineHrConfig()
+  const claims = []
+  const rest = body.events.filter((ev) => {
+    const text = ev.type === 'message' && ev.message && ev.message.type === 'text' ? String(ev.message.text) : ''
+    const m = text.match(/\bVT-?(\d{6})\b/i)
+    const uid = ev.source && ev.source.userId
+    if (m && uid && CacheService.getScriptCache().get('lc:' + m[1])) {
+      claims.push({ code: m[1], uid: uid })
+      return false
+    }
+    return true
+  })
+  // ส่งต่อก่อนเพื่อให้บอท HR ตอบได้ทันก่อน reply token หมดอายุ
+  if (hr.webhookUrl && (rest.length || !body.events.length)) {
+    const payload = rest.length === body.events.length ? raw : JSON.stringify(Object.assign({}, body, { events: rest }))
+    UrlFetchApp.fetch(hr.webhookUrl, { method: 'post', contentType: 'application/json', payload: payload, muteHttpExceptions: true })
+  }
+  claims.forEach((c) => claimLinkCode(c.code, c.uid))
+}
+
+function claimLinkCode(code, hrUid) {
+  const cache = CacheService.getScriptCache()
+  const pending = JSON.parse(cache.get('lc:' + code) || 'null')
+  if (!pending) return
+  cache.remove('lc:' + code)
+  if (!getUsers()[hrUid]) {
+    cache.put('lc-fail:' + code, '1', 900)
+    return
+  }
+  PropertiesService.getScriptProperties().setProperty('link:' + pending.sub, hrUid)
+}
 
 function verifyLineIdToken(idToken) {
   if (!idToken) throw vtError(400, 'NO_TOKEN', 'ไม่พบข้อมูลยืนยันตัวตนจาก LINE')
@@ -430,13 +533,14 @@ function getUsers() {
  * เลยจับคู่ครั้งแรกด้วยข้อมูลที่ LINE ยืนยันใน ID token: รูปโปรไฟล์ (คอลัมน์ H) ก่อน แล้วค่อยชื่อ LINE (คอลัมน์ G)
  * ต้องตรงกับพนักงานคนเดียวเท่านั้น จับคู่ได้แล้วจำไว้ใน Script Properties ครั้งต่อไปไม่ต้องเทียบใหม่
  */
-function findEmployee(line) {
+function findEmployee(line, opts) {
   const users = getUsers()
   if (users[line.sub]) return users[line.sub]
 
   const props = PropertiesService.getScriptProperties()
   const linked = props.getProperty('link:' + line.sub)
   if (linked && users[linked]) return users[linked]
+  if (opts && opts.guess === false) return null
 
   const list = Object.keys(users).map((k) => users[k])
   const pic = pictureKey(line.picture)
