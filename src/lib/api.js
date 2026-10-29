@@ -58,6 +58,7 @@ export const api = {
   images: (ids, size, campaignId) => call('images', { ids, size, campaignId }).then((d) => d.images || {}),
   vote: (campaignId, entryId) => call('vote', { campaignId, entryId }),
   form: (campaignId) => call('form', { campaignId }),
+  results: (campaignId) => call('results', { campaignId }),
   submitResponse: (campaignId, answers) => call('submitResponse', { campaignId, answers }),
   stats: (campaignId) => call('stats', { campaignId }),
   formResults: (campaignId) => call('formResults', { campaignId }),

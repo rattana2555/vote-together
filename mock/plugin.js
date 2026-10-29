@@ -63,7 +63,7 @@ const campaigns = [
     title: 'HALLOWEEN 2026 หลอนให้สุด แล้วหยุดที่ความปัง',
     subtitle: 'โหวตภาพชุดฮาโลวีนที่ปังที่สุด เลือกได้ 1 ภาพต่อ 1 บัญชี LINE',
     endsAt: '',
-    showCounts: true,
+    resultsMode: 'always',
     source: 'sheet',
     sheetUrl: 'https://docs.google.com/spreadsheets/d/MOCK-SHEET-ID-0000000000/edit?gid=0',
     createdAt: '2026-10-28 10:00:00',
@@ -77,7 +77,7 @@ const campaigns = [
     title: 'เลือกเมนูเลี้ยงปีใหม่',
     subtitle: 'ช่วยกันเลือกเมนูและบรรยากาศงานเลี้ยงปีใหม่ 2027',
     endsAt: '',
-    showCounts: true,
+    resultsMode: 'afterVote',
     source: 'form',
     sheetUrl: '',
     createdAt: '2026-10-29 09:00:00',
@@ -123,7 +123,16 @@ const isClosed = (c) => Boolean(c.endsAt) && Date.now() > new Date(c.endsAt).get
 const votesOf = (c) => votes.filter((v) => v.campaignId === c.id)
 const responsesOf = (c) => responses.filter((r) => r.campaignId === c.id)
 const countOf = (c, id) => votesOf(c).filter((v) => v.entryId === id).length
-const pub = (c) => ({ id: c.id, title: c.title, subtitle: c.subtitle, endsAt: c.endsAt || null, showCounts: c.showCounts, source: c.source, published: c.published, closed: isClosed(c) })
+const pub = (c) => ({ id: c.id, title: c.title, subtitle: c.subtitle, endsAt: c.endsAt || null, showCounts: c.resultsMode === 'always', resultsMode: c.resultsMode, source: c.source, published: c.published, closed: isClosed(c) })
+const visible = (c, u, participated) => isAdmin(u) || c.resultsMode === 'always' || (c.resultsMode === 'afterVote' && participated) || (c.resultsMode === 'afterClose' && isClosed(c))
+const live = (c) =>
+  c.source === 'form'
+    ? { kind: 'form', ...aggregate(c, false) }
+    : {
+        kind: 'ranking',
+        total: votesOf(c).length,
+        entries: c.entries.map((e) => ({ id: e.id, title: e.title, author: e.author, imageId: e.imageId, votes: countOf(c, e.id) })).sort((a, b) => b.votes - a.votes),
+      }
 const strip = ({ entries, questions, ...c }) => c
 const now = () => new Date().toISOString().replace('T', ' ').slice(0, 19)
 const done = (c, uid) => (c.source === 'form' ? responsesOf(c) : votesOf(c)).some((x) => x.uid === uid)
@@ -253,10 +262,17 @@ const actions = {
   me: (b, u) => ({ user: profile(u) }),
   entries: (b, u) => {
     const c = voterCampaign(b, u)
+    const mine = votesOf(c).find((v) => v.uid === u.uid)
     return {
-      votedEntryId: votesOf(c).find((v) => v.uid === u.uid)?.entryId ?? null,
-      entries: c.entries.map((e) => ({ ...e, votes: c.showCounts || isAdmin(u) ? countOf(c, e.id) : undefined })),
+      votedEntryId: mine?.entryId ?? null,
+      entries: c.entries.map((e) => ({ ...e, votes: visible(c, u, Boolean(mine)) ? countOf(c, e.id) : undefined })),
     }
+  },
+  results: (b, u) => {
+    const c = voterCampaign(b, u)
+    const d = done(c, u.uid)
+    const v = visible(c, u, d)
+    return { mode: c.resultsMode, visible: v, done: d, updatedAt: new Date().toISOString(), data: v ? live(c) : null }
   },
   images: (b) => ({ images: Object.fromEntries((b.ids || []).slice(0, 8).map((id) => [id, imageData(id)])) }),
   vote: async (b, u) => {
@@ -269,12 +285,12 @@ const actions = {
     const mine = votesOf(c).find((v) => v.uid === u.uid)
     if (mine) throw new Fail(409, 'ALREADY_VOTED', 'บัญชีนี้โหวตไปแล้ว', { votedEntryId: mine.entryId })
     votes.push({ campaignId: c.id, uid: u.uid, entryId: entry.id })
-    return { entryId: entry.id, votes: c.showCounts ? countOf(c, entry.id) : undefined }
+    return { entryId: entry.id, votes: visible(c, u, true) ? countOf(c, entry.id) : undefined }
   },
   form: (b, u) => {
     const c = voterCampaign(b, u)
     const mine = responsesOf(c).find((r) => r.uid === u.uid)
-    return { questions: c.questions, myAnswers: mine?.answers ?? null, results: mine && (c.showCounts || isAdmin(u)) ? aggregate(c, false) : null }
+    return { questions: c.questions, myAnswers: mine?.answers ?? null, results: visible(c, u, Boolean(mine)) ? aggregate(c, false) : null }
   },
   submitResponse: async (b, u) => {
     await wait(500)
@@ -284,7 +300,7 @@ const actions = {
     const answers = cleanAnswers(c, b.answers || {})
     if (responsesOf(c).some((r) => r.uid === u.uid)) throw new Fail(409, 'ALREADY_ANSWERED', 'บัญชีนี้ส่งคำตอบไปแล้ว')
     responses.push({ campaignId: c.id, uid: u.uid, answers })
-    return { answers, results: c.showCounts ? aggregate(c, false) : null }
+    return { answers, results: visible(c, u, true) ? aggregate(c, false) : null }
   },
   stats: (b, u) => {
     requireAdmin(u)
@@ -361,7 +377,7 @@ const actions = {
       title: x.title.trim(),
       subtitle: String(x.subtitle || '').trim(),
       endsAt: x.endsAt || '',
-      showCounts: Boolean(x.showCounts),
+      resultsMode: ['never', 'always', 'afterVote', 'afterClose'].includes(x.resultsMode) ? x.resultsMode : 'never',
       source,
       sheetUrl: source === 'sheet' ? x.sheetUrl : '',
       createdAt: prev?.createdAt || now(),

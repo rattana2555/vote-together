@@ -2531,6 +2531,89 @@ button.dropzone {
   text-decoration: none;
 }
 
+/* ---------- live results ---------- */
+.view-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+.view-bar .tabs {
+  margin-bottom: 0;
+}
+.view-bar .q-title {
+  font-size: 16px;
+}
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--coral) 14%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.live-badge i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--coral);
+  box-shadow: 0 0 0 0 rgba(255, 141, 156, 0.6);
+  animation: livePing 1.6s ease-out infinite;
+}
+.result-hint {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 14px;
+}
+.q-card .result-hint {
+  margin-bottom: 14px;
+}
+.chip-row.wrap {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+.live-rank {
+  margin-top: 0;
+}
+.rank-row.is-mine {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.rank-row .rank-no.is-top {
+  color: #fff;
+  background: var(--grad-warm);
+  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+}
+.peek {
+  display: grid;
+  gap: 4px;
+}
+.peek .view-bar {
+  margin-bottom: 0;
+}
+@keyframes livePing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 141, 156, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(255, 141, 156, 0);
+  }
+}
+
 /* ---------- keyframes ---------- */
 @keyframes bob {
   from {
@@ -2625,6 +2708,7 @@ button.dropzone {
   .l3-sheen,
   .amb-float,
   .ring i,
+  .live-badge i,
   .eyebrow-dot,
   .shimmer,
   .card-media:not(.is-loaded) {

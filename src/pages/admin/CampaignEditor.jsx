@@ -246,7 +246,7 @@ export default function CampaignEditor({ initial, onBack, onSaved }) {
     title: initial.title || '',
     subtitle: initial.subtitle || '',
     endsAt: toLocalInput(initial.endsAt),
-    showCounts: Boolean(initial.showCounts),
+    resultsMode: initial.resultsMode || (initial.showCounts ? 'always' : initial.id ? 'never' : 'afterVote'),
     source: initial.source || 'form',
     sheetUrl: initial.sheetUrl || '',
   }))
@@ -342,10 +342,28 @@ export default function CampaignEditor({ initial, onBack, onSaved }) {
             <input type="url" required value={form.sheetUrl} onChange={set('sheetUrl')} placeholder="https://docs.google.com/spreadsheets/d/…" />
           </label>
         )}
-        <label className="check">
-          <input type="checkbox" checked={form.showCounts} onChange={set('showCounts')} />
-          <span>ให้ผู้โหวตเห็นคะแนนของแต่ละผลงาน</span>
-        </label>
+        <div className="field field-wide">
+          <span className="field-label">ผู้โหวตเห็นผลคะแนนสดเมื่อไหร่ (แอดมินเห็นเสมอ)</span>
+          <div className="chip-row wrap" role="radiogroup">
+            {[
+              ['afterVote', 'หลังโหวต/ตอบแล้ว'],
+              ['always', 'ตลอดเวลา'],
+              ['afterClose', 'หลังปิดโหวต'],
+              ['never', 'ไม่ให้เห็น'],
+            ].map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={form.resultsMode === v}
+                className={`chip${form.resultsMode === v ? ' is-on' : ''}`}
+                onClick={() => setForm((f) => ({ ...f, resultsMode: v }))}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {form.source === 'sheet' && detected && (
           <div className="detected">

@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AnimatePresence, LayoutGroup } from 'framer-motion'
+import { AnimatePresence, LayoutGroup, motion } from 'framer-motion'
 import EntryCard from './EntryCard.jsx'
 import DetailView from './DetailView.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import Celebration from './Celebration.jsx'
 import Button from './Button.jsx'
 import { GallerySkeleton } from './Skeleton.jsx'
+import LiveBadge from './LiveBadge.jsx'
+import LiveRanking from './LiveRanking.jsx'
+import { RESULT_HINT, useLiveResults } from '../lib/live.js'
+import { spring } from '../lib/motion.js'
 import { api } from '../lib/api.js'
 import { navigate } from '../lib/router.js'
 
@@ -20,7 +24,12 @@ export default function GalleryView({ campaign, user }) {
   const [voteError, setVoteError] = useState('')
   const [errorKey, setErrorKey] = useState(0)
   const [celebrate, setCelebrate] = useState(null)
-  const showCounts = campaign.showCounts || user.role === 'admin'
+  const [tab, setTab] = useState('gallery')
+  const isAdmin = user.role === 'admin'
+  const [live, refreshLive] = useLiveResults(campaign.id, isAdmin || (campaign.resultsMode || 'never') !== 'never')
+  const liveVotes = live?.visible && live.data?.entries ? Object.fromEntries(live.data.entries.map((e) => [e.id, e.votes])) : null
+  const showCounts = Boolean(liveVotes) || Boolean(entries?.some((e) => typeof e.votes === 'number'))
+  const shown = liveVotes && entries ? entries.map((e) => ({ ...e, votes: liveVotes[e.id] ?? e.votes })) : entries
 
   const load = useCallback(async () => {
     setLoadError('')
@@ -37,7 +46,7 @@ export default function GalleryView({ campaign, user }) {
     load()
   }, [load])
 
-  const openEntry = entries?.find((e) => e.id === openId)
+  const openEntry = shown?.find((e) => e.id === openId)
   const selectedEntry = entries?.find((e) => e.id === selectedId)
 
   const requestVote = (id) => {
@@ -67,6 +76,7 @@ export default function GalleryView({ campaign, user }) {
       setStatus('success')
       setSelectedId(null)
       setCelebrate(entries.find((e) => e.id === id))
+      refreshLive()
     } catch (err) {
       if (err.status === 409 && err.data?.votedEntryId) setVotedEntryId(err.data.votedEntryId)
       if (err.status === 401) {
@@ -101,12 +111,36 @@ export default function GalleryView({ campaign, user }) {
     )
   }
 
+  const hint = !live?.visible && RESULT_HINT[campaign.resultsMode]
+
   return (
     <>
+      <div className="view-bar">
+        {live?.visible ? (
+          <div className="tabs" role="tablist">
+            {[
+              ['gallery', 'ผลงาน'],
+              ['ranking', 'อันดับตอนนี้'],
+            ].map(([key, label]) => (
+              <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? 'is-on' : ''} onClick={() => setTab(key)}>
+                {tab === key && <motion.span layoutId="gallery-tab" className="tab-pill" transition={spring} />}
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          hint && <p className="result-hint">{hint}</p>
+        )}
+        {live?.visible && <LiveBadge updatedAt={live.updatedAt} />}
+      </div>
       {votedEntryId && <p className="pill pill-success voted-pill">คุณโหวตแล้ว · ขอบคุณที่ร่วมสร้างช่วงเวลานี้</p>}
+
+      {tab === 'ranking' && live?.visible ? (
+        <LiveRanking data={live.data} votedEntryId={votedEntryId} />
+      ) : (
       <LayoutGroup>
         <div className="gallery">
-          {entries.map((entry, i) => (
+          {shown.map((entry, i) => (
             <EntryCard
               key={entry.id}
               entry={entry}
@@ -133,6 +167,7 @@ export default function GalleryView({ campaign, user }) {
           )}
         </AnimatePresence>
       </LayoutGroup>
+      )}
 
       <AnimatePresence>
         {selectedEntry && (

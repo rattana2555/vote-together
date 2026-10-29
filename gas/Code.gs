@@ -13,7 +13,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v3.3'
+const VER = 'v3.4'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -41,6 +41,9 @@ const DATA_TABS = {
   RESPONSES: ['รหัสกิจกรรม', 'เวลา', 'LINE userId', 'รหัสพนักงาน', 'ชื่อผู้ตอบ', 'คำตอบ (JSON)', 'คำตอบ (อ่านง่าย)'],
 }
 const QUESTION_TYPES = ['single', 'multi', 'text', 'rating']
+// ผู้โหวตเห็นผลเมื่อไหร่: never ไม่ให้เห็น · always ตลอดเวลา · afterVote หลังโหวต/ตอบแล้ว · afterClose หลังปิดโหวต
+const RESULT_MODES = ['never', 'always', 'afterVote', 'afterClose']
+const LIVE_CACHE_SECONDS = 15
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 const SESSION_HOURS = 72
 const IMAGE_SIZES = { s: 's640', l: 's1600', a: 's200' }
@@ -143,7 +146,7 @@ const ACTIONS = {
     return {
       questions: qs,
       myAnswers: mine ? mine.answers : null,
-      results: mine && (cfg.showCounts || isAdmin(u)) ? aggregate(qs, all, false) : null,
+      results: resultsVisible(cfg, u, Boolean(mine)) ? aggregate(qs, all, false) : null,
     }
   },
 
@@ -159,7 +162,8 @@ const ACTIONS = {
     try {
       if (readResponses(cfg).some((r) => r.uid === u.uid)) throw vtError(409, 'ALREADY_ANSWERED', 'บัญชีนี้ส่งคำตอบไปแล้ว')
       appendDataRow('RESPONSES', [cfg.id, nowText(), u.uid, u.empId, displayName(u), JSON.stringify(answers), readableAnswers(qs, answers)])
-      return { answers: answers, results: cfg.showCounts ? aggregate(qs, readResponses(cfg), false) : null }
+      CacheService.getScriptCache().remove('live:' + cfg.id)
+      return { answers: answers, results: resultsVisible(cfg, u, true) ? aggregate(qs, readResponses(cfg), false) : null }
     } finally {
       lock.releaseLock()
     }
@@ -169,9 +173,8 @@ const ACTIONS = {
     const u = requireUser(body)
     const cfg = voterCampaign(body, u)
     const votes = readVotes(cfg)
-    const reveal = cfg.showCounts || isAdmin(u)
-    const counts = reveal ? countVotes(votes) : null
     const mine = votes.find((v) => v.uid === u.uid)
+    const counts = resultsVisible(cfg, u, Boolean(mine)) ? countVotes(votes) : null
     return {
       votedEntryId: mine ? mine.entryId : null,
       entries: readEntries(cfg).map((e) => ({
@@ -184,6 +187,15 @@ const ACTIONS = {
         votes: counts ? counts[e.id] || 0 : undefined,
       })),
     }
+  },
+
+  // ผลสดสำหรับผู้โหวต (หน้าเว็บถามซ้ำทุก ~20 วินาที · ผลรวมจำไว้ 15 วินาทีเพื่อไม่ให้อ่านชีททุกครั้ง)
+  results: (body) => {
+    const u = requireUser(body)
+    const cfg = voterCampaign(body, u)
+    const done = hasParticipated(cfg, u.uid)
+    const visible = resultsVisible(cfg, u, done)
+    return { mode: cfg.resultsMode, visible: visible, done: done, updatedAt: new Date().toISOString(), data: visible ? liveResults(cfg) : null }
   },
 
   images: (body) => {
@@ -209,7 +221,8 @@ const ACTIONS = {
       if (mine) throw vtError(409, 'ALREADY_VOTED', 'บัญชีนี้โหวตไปแล้ว', { votedEntryId: mine.entryId })
       appendVote(cfg, [nowText(), u.uid, u.empId, displayName(u), entry.id, entry.title])
       const count = votes.filter((v) => v.entryId === entry.id).length + 1
-      return { entryId: entry.id, votes: cfg.showCounts ? count : undefined }
+      CacheService.getScriptCache().remove('live:' + cfg.id)
+      return { entryId: entry.id, votes: resultsVisible(cfg, u, true) ? count : undefined }
     } finally {
       lock.releaseLock()
     }
@@ -256,7 +269,7 @@ const ACTIONS = {
       title: String(c.title || '').trim(),
       subtitle: String(c.subtitle || '').trim(),
       endsAt: String(c.endsAt || '').trim(),
-      showCounts: Boolean(c.showCounts),
+      resultsMode: RESULT_MODES.indexOf(c.resultsMode) !== -1 ? c.resultsMode : c.showCounts ? 'always' : 'never',
       source: ['sheet', 'form'].indexOf(c.source) !== -1 ? c.source : 'app',
       sheetUrl: c.source === 'sheet' ? String(c.sheetUrl || '').trim() : '',
       createdAt: prev ? prev.createdAt : nowText(),
@@ -280,6 +293,7 @@ const ACTIONS = {
       }
       if (!detected.columns.image) throw vtError(400, 'NO_IMAGE_COLUMN', 'ไม่พบคอลัมน์ลิงก์รูปภาพจาก Google Drive ในแท็บนี้')
     }
+    next.showCounts = next.resultsMode === 'always'
     writeCampaign(next)
     clearEntriesCache(next)
     return { campaign: next, detected: detected }
@@ -670,7 +684,7 @@ function newId(prefix) {
 
 function listCampaigns() {
   const cache = CacheService.getScriptCache()
-  const hit = cache.get('campaigns2')
+  const hit = cache.get('campaigns3')
   if (hit) return JSON.parse(hit)
 
   let rows = readDataTab('CAMPAIGNS')
@@ -690,7 +704,8 @@ function listCampaigns() {
       title: r[1],
       subtitle: r[2],
       endsAt: r[3],
-      showCounts: r[4] === 'yes',
+      resultsMode: resultsModeOf(r[4]),
+      showCounts: resultsModeOf(r[4]) === 'always',
       source: r[5] === 'sheet' ? 'sheet' : 'app',
       sheetUrl: r[6],
       createdAt: r[7],
@@ -701,18 +716,18 @@ function listCampaigns() {
     }))
     .filter((c) => !c.deleted)
     .reverse()
-  cache.put('campaigns2', JSON.stringify(list), 120)
+  cache.put('campaigns3', JSON.stringify(list), 120)
   return list
 }
 
 function writeCampaign(c) {
-  const row = [c.id, c.title, c.subtitle, c.endsAt, c.showCounts ? 'yes' : 'no', c.source, c.sheetUrl || '', c.createdAt, c.createdBy, c.published ? 'yes' : 'no', c.deleted ? 'yes' : '']
+  const row = [c.id, c.title, c.subtitle, c.endsAt, c.resultsMode || (c.showCounts ? 'always' : 'never'), c.source, c.sheetUrl || '', c.createdAt, c.createdBy, c.published ? 'yes' : 'no', c.deleted ? 'yes' : '']
   const sh = dataBook().getSheetByName('CAMPAIGNS')
   const ids = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues().map((r) => r[0]) : []
   const at = ids.indexOf(c.id)
   if (at === -1) appendDataRow('CAMPAIGNS', row)
   else sh.getRange(at + 2, 1, 1, row.length).setNumberFormat('@').setValues([row.map(String)])
-  CacheService.getScriptCache().remove('campaigns2')
+  CacheService.getScriptCache().remove('campaigns3')
 }
 
 function campaignById(id) {
@@ -728,6 +743,44 @@ function voterCampaign(body, u) {
   return c
 }
 
+// ค่าเก่าในชีทเป็น yes/no
+function resultsModeOf(v) {
+  if (v === 'yes') return 'always'
+  return RESULT_MODES.indexOf(v) !== -1 ? v : 'never'
+}
+
+function resultsVisible(cfg, u, participated) {
+  if (u && isAdmin(u)) return true
+  const mode = cfg.resultsMode || 'never'
+  return mode === 'always' || (mode === 'afterVote' && participated) || (mode === 'afterClose' && isClosed(cfg))
+}
+
+function liveResults(cfg) {
+  const cache = CacheService.getScriptCache()
+  const hit = cache.get('live:' + cfg.id)
+  if (hit) return JSON.parse(hit)
+  let data
+  if (cfg.source === 'form') {
+    data = Object.assign({ kind: 'form' }, aggregate(readQuestions(cfg), readResponses(cfg), false))
+  } else {
+    const votes = readVotes(cfg)
+    const counts = countVotes(votes)
+    data = {
+      kind: 'ranking',
+      total: votes.length,
+      entries: readEntries(cfg)
+        .map((e) => ({ id: e.id, title: e.title, author: e.author, imageId: e.imageId, votes: counts[e.id] || 0 }))
+        .sort((a, b) => b.votes - a.votes),
+    }
+  }
+  try {
+    cache.put('live:' + cfg.id, JSON.stringify(data), LIVE_CACHE_SECONDS)
+  } catch (_) {
+    /* very large result: skip caching */
+  }
+  return data
+}
+
 function hasParticipated(cfg, uid) {
   return cfg.source === 'form' ? readResponses(cfg).some((r) => r.uid === uid) : readVotes(cfg).some((v) => v.uid === uid)
 }
@@ -738,7 +791,8 @@ function publicCampaign(cfg) {
     title: cfg.title,
     subtitle: cfg.subtitle,
     endsAt: cfg.endsAt || null,
-    showCounts: Boolean(cfg.showCounts),
+    showCounts: cfg.resultsMode === 'always',
+    resultsMode: cfg.resultsMode || 'never',
     source: cfg.source,
     published: Boolean(cfg.published),
     closed: isClosed(cfg),

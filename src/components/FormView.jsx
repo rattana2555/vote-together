@@ -5,6 +5,9 @@ import ConfirmBox from './ConfirmBox.jsx'
 import Celebration from './Celebration.jsx'
 import DriveImg from './DriveImg.jsx'
 import ResultBars from './ResultBars.jsx'
+import LiveBadge from './LiveBadge.jsx'
+import { RESULT_HINT, useLiveResults } from '../lib/live.js'
+import { useSession } from '../state/session.jsx'
 import { api } from '../lib/api.js'
 import { navigate } from '../lib/router.js'
 import { store } from '../lib/storage.js'
@@ -95,6 +98,9 @@ function answerText(q, a) {
 
 // Forms/polls built in the app: answer once, then see your answers (and results if the admin allows).
 export default function FormView({ campaign }) {
+  const { user } = useSession()
+  const [live, refreshLive] = useLiveResults(campaign.id, user?.role === 'admin' || (campaign.resultsMode || 'never') !== 'never')
+  const [peek, setPeek] = useState(false)
   const [data, setData] = useState(null)
   const [answers, setAnswers] = useState(() => {
     try {
@@ -161,6 +167,7 @@ export default function FormView({ campaign }) {
       setConfirm(false)
       setData((d) => ({ ...d, myAnswers: res.answers, results: res.results }))
       setCelebrate(true)
+      refreshLive()
       scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err) {
       setConfirm(false)
@@ -204,6 +211,9 @@ export default function FormView({ campaign }) {
     )
   }
 
+  const results = live?.visible && live.data?.questions ? live.data : data.results
+  const hint = !results && RESULT_HINT[campaign.resultsMode]
+
   if (data.myAnswers) {
     return (
       <div className="form-stack">
@@ -211,10 +221,17 @@ export default function FormView({ campaign }) {
           <b>ส่งคำตอบแล้ว ขอบคุณที่ร่วมกิจกรรม</b>
           <span>1 บัญชี LINE ตอบได้ 1 ครั้ง</span>
         </motion.div>
-        {data.results ? (
-          <ResultBars results={data.results} />
+        {results ? (
+          <>
+            <div className="view-bar">
+              <h3 className="q-title">ผลรวมตอนนี้ · ตอบแล้ว {results.total.toLocaleString('th-TH')} คน</h3>
+              {live?.visible && <LiveBadge updatedAt={live.updatedAt} />}
+            </div>
+            <ResultBars results={results} />
+          </>
         ) : (
           <div className="q-card">
+            {hint && <p className="result-hint">{hint}</p>}
             <h3 className="q-title">คำตอบของคุณ</h3>
             <dl className="my-answers">
               {data.questions.map((q, i) => (
@@ -238,6 +255,25 @@ export default function FormView({ campaign }) {
   const closed = campaign.closed
   return (
     <motion.div className="form-stack" variants={stagger(0.06)} initial="hidden" animate="show">
+      {results ? (
+        <div className="peek">
+          <div className="view-bar">
+            <button type="button" className="back-link" onClick={() => setPeek((p) => !p)} aria-expanded={peek}>
+              {peek ? 'ซ่อนผลรวม' : `ดูผลรวมตอนนี้ (${results.total.toLocaleString('th-TH')} คน)`}
+            </button>
+            {live?.visible && <LiveBadge updatedAt={live.updatedAt} />}
+          </div>
+          <AnimatePresence initial={false}>
+            {peek && (
+              <motion.div key="peek" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden' }}>
+                <ResultBars results={results} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      ) : (
+        hint && <p className="result-hint">{hint}</p>
+      )}
       {data.questions.map((q, i) => (
         <motion.section
           key={q.id}

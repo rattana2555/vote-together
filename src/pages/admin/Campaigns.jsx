@@ -70,7 +70,7 @@ export default function Campaigns({ campaigns, reload }) {
     <div className="admin-panel">
       <div className="panel-head">
         <p>แสดงในหน้าโหวตได้พร้อมกันหลายกิจกรรม กิจกรรมใหม่จะซ่อนไว้ก่อนจนกว่าจะกด “แสดงในหน้าโหวต”</p>
-        <Button size="sm" onClick={() => setEditing({ source: 'form', showCounts: false, _key: ++editorSeq })}>
+        <Button size="sm" onClick={() => setEditing({ source: 'form', resultsMode: 'afterVote', _key: ++editorSeq })}>
           + สร้างกิจกรรมใหม่
         </Button>
       </div>
