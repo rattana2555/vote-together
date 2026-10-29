@@ -1924,65 +1924,6 @@ h3 {
   flex: 1 1 260px;
 }
 
-/* ---------- LINE HR chat-code verification ---------- */
-.link-prompt {
-  display: grid;
-  gap: 14px;
-  margin-top: 22px;
-  text-align: center;
-}
-.link-prompt h2 {
-  font-size: 20px;
-  font-weight: 600;
-}
-.link-prompt > p {
-  margin: 0;
-  color: var(--text-2);
-  font-size: 14px;
-  line-height: 1.6;
-}
-.link-code {
-  display: grid;
-  gap: 2px;
-  padding: 14px;
-  border-radius: 18px;
-  border: 2px dashed var(--accent);
-  background: var(--accent-soft);
-  color: var(--text);
-  font-size: 30px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-.link-code span {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0;
-  color: var(--text-3);
-}
-.link-prompt a.btn {
-  text-decoration: none;
-}
-.link-wait {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 0;
-  color: var(--text-2);
-  font-size: 13px;
-}
-.link-prompt .btn-ghost {
-  justify-self: center;
-}
-.mono {
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  font-size: 12px;
-  word-break: break-all;
-  color: var(--text);
-}
-
 /* ---------- keyframes ---------- */
 @keyframes bob {
   from {
