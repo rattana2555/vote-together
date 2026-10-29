@@ -13,7 +13,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v3.0'
+const VER = 'v3.3'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -34,7 +34,7 @@ const VOTES_TAB = 'VOTE_TOGETHER_VOTES'
 const VOTES_HEADER = ['เวลา', 'LINE userId', 'รหัสพนักงาน', 'ชื่อผู้โหวต', 'รหัสผลงาน', 'ชื่อผลงาน']
 
 const DATA_TABS = {
-  CAMPAIGNS: ['รหัสกิจกรรม', 'ชื่อกิจกรรม', 'คำโปรย', 'ปิดโหวต', 'โชว์คะแนน', 'แหล่งผลงาน', 'ลิงก์ชีท', 'สร้างเมื่อ', 'สร้างโดย', 'แสดงในหน้าโหวต'],
+  CAMPAIGNS: ['รหัสกิจกรรม', 'ชื่อกิจกรรม', 'คำโปรย', 'ปิดโหวต', 'โชว์คะแนน', 'แหล่งผลงาน', 'ลิงก์ชีท', 'สร้างเมื่อ', 'สร้างโดย', 'แสดงในหน้าโหวต', 'ลบแล้ว'],
   ENTRIES: ['รหัสกิจกรรม', 'รหัสผลงาน', 'ชื่อผลงาน', 'เจ้าของผลงาน', 'รหัสรูป', 'กว้าง', 'สูง', 'เพิ่มเมื่อ', 'เพิ่มโดย'],
   VOTES: ['รหัสกิจกรรม'].concat(VOTES_HEADER),
   QUESTIONS: ['รหัสกิจกรรม', 'รหัสคำถาม', 'ลำดับ', 'ประเภท', 'คำถาม', 'ข้อมูล (JSON)'],
@@ -109,13 +109,19 @@ const ACTIONS = {
 
   login: (body) => {
     const line = verifyLineIdToken(body.idToken)
-    const u = findEmployee(line)
+    let u = findEmployee(line)
+    if (!u) {
+      // อาจเพิ่งลงทะเบียนกับ LINE HR: อ่านรายชื่อจากชีทใหม่ ไม่ใช้ที่จำไว้
+      CacheService.getScriptCache().remove('users2')
+      u = findEmployee(line)
+    }
     if (u) return sessionFor(u, line.picture)
     console.warn('login not matched sub=%s name=%s', line.sub, line.name)
     throw vtError(
       403,
       'NOT_REGISTERED',
-      'ไม่พบบัญชี LINE “' + line.name + '” ในรายชื่อพนักงานที่ลงทะเบียนกับ LINE HR ถ้าเพิ่งเปลี่ยนชื่อหรือรูปโปรไฟล์ LINE แจ้งผู้ดูแลกิจกรรมได้เลย',
+      'บัญชี LINE “' + line.name + '” ยังไม่ได้ลงทะเบียนพนักงาน กรุณาลงทะเบียนผ่านระบบของ LINE HR ก่อน แล้วกลับมาเข้าสู่ระบบอีกครั้ง',
+      { lineHrUrl: lineHrLink() },
     )
   },
 
@@ -279,6 +285,14 @@ const ACTIONS = {
     return { campaign: next, detected: detected }
   },
 
+  // ลบออกจากแอป แต่แถวข้อมูล คะแนน คำตอบ และรูปยังอยู่ในชีท/Drive (กู้คืน: ลบคำว่า yes ในคอลัมน์ 'ลบแล้ว')
+  deleteCampaign: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    writeCampaign(Object.assign({}, cfg, { published: false, deleted: true }))
+    return { campaignId: cfg.id }
+  },
+
   setPublished: (body) => {
     requireAdmin(body)
     const cfg = campaignById(body.campaignId)
@@ -363,6 +377,22 @@ const ACTIONS = {
     )
   },
 
+  // ลิงก์เปิดแชท LINE HR (ใช้แสดงปุ่มให้คนที่ยังไม่ลงทะเบียน · ไม่ได้แตะตั้งค่าใด ๆ ของ LINE HR)
+  getLineHrLink: (body) => {
+    requireAdmin(body)
+    return { value: PropertiesService.getScriptProperties().getProperty('HR_LINK') || '', url: lineHrLink() }
+  },
+
+  saveLineHrLink: (body) => {
+    requireAdmin(body)
+    const v = String(body.value || '').trim()
+    if (v && !/^@[\w.\-]+$/.test(v) && !/^https:\/\/(line\.me|lin\.ee|liff\.line\.me)\/\S+$/.test(v)) {
+      throw vtError(400, 'BAD_LINK', 'ใส่ LINE ID ที่ขึ้นต้นด้วย @ หรือลิงก์ https://lin.ee/… / https://line.me/…')
+    }
+    PropertiesService.getScriptProperties().setProperty('HR_LINK', v)
+    return { value: v, url: lineHrLink() }
+  },
+
   employees: (body) => {
     requireAdmin(body)
     const users = getUsers()
@@ -416,6 +446,12 @@ function verifyLineIdToken(idToken) {
   }
   const data = JSON.parse(res.getContentText())
   return { sub: String(data.sub), picture: String(data.picture || ''), name: String(data.name || '') }
+}
+
+function lineHrLink() {
+  const v = PropertiesService.getScriptProperties().getProperty('HR_LINK') || ''
+  if (!v) return ''
+  return v.charAt(0) === '@' ? 'https://line.me/R/ti/p/' + encodeURIComponent(v) : v
 }
 
 function sessionSecret() {
@@ -661,14 +697,16 @@ function listCampaigns() {
       createdBy: r[8],
       // แถวก่อน v3.0 ไม่มีคอลัมน์นี้: ใช้กิจกรรมที่เคยเปิดใช้อยู่
       published: r[9] ? r[9] === 'yes' : r[0] === legacyActive,
+      deleted: r[10] === 'yes',
     }))
+    .filter((c) => !c.deleted)
     .reverse()
   cache.put('campaigns2', JSON.stringify(list), 120)
   return list
 }
 
 function writeCampaign(c) {
-  const row = [c.id, c.title, c.subtitle, c.endsAt, c.showCounts ? 'yes' : 'no', c.source, c.sheetUrl || '', c.createdAt, c.createdBy, c.published ? 'yes' : 'no']
+  const row = [c.id, c.title, c.subtitle, c.endsAt, c.showCounts ? 'yes' : 'no', c.source, c.sheetUrl || '', c.createdAt, c.createdBy, c.published ? 'yes' : 'no', c.deleted ? 'yes' : '']
   const sh = dataBook().getSheetByName('CAMPAIGNS')
   const ids = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues().map((r) => r[0]) : []
   const at = ids.indexOf(c.id)
@@ -1070,15 +1108,28 @@ function loadImages(ids, size) {
   })
   if (!missing.length) return out
 
-  const links = UrlFetchApp.fetchAll(missing.map((id) => driveApi('files/' + id + '?supportsAllDrives=true&fields=thumbnailLink,size')))
+  // thumbnailLink ใช้ได้หลายชั่วโมง จำไว้ 50 นาทีเพื่อข้ามการถาม Drive ไปหนึ่งรอบ
+  const cache = CacheService.getScriptCache()
+  const known = cache.getAll(missing.map((id) => 'tl:' + id))
   const want = []
   const direct = []
+  const ask = []
+  missing.forEach((id) => {
+    const link = known['tl:' + id]
+    if (link) want.push({ id: id, url: link.replace(/=s\d+$/, '=' + IMAGE_SIZES[size]), cached: true })
+    else ask.push(id)
+  })
+  const links = UrlFetchApp.fetchAll(ask.map((id) => driveApi('files/' + id + '?supportsAllDrives=true&fields=thumbnailLink,size')))
+  const fresh = {}
   links.forEach((r, k) => {
     if (r.getResponseCode() !== 200) return
     const d = JSON.parse(r.getContentText())
-    if (d.thumbnailLink) want.push({ id: missing[k], url: d.thumbnailLink.replace(/=s\d+$/, '=' + IMAGE_SIZES[size]) })
-    else if (Number(d.size) < 1500000) direct.push(missing[k]) // รูปเพิ่งอัปโหลด Drive ยังทำ thumbnail ไม่เสร็จ
+    if (d.thumbnailLink) {
+      fresh['tl:' + ask[k]] = d.thumbnailLink
+      want.push({ id: ask[k], url: d.thumbnailLink.replace(/=s\d+$/, '=' + IMAGE_SIZES[size]) })
+    } else if (Number(d.size) < 1500000) direct.push(ask[k]) // รูปเพิ่งอัปโหลด Drive ยังทำ thumbnail ไม่เสร็จ
   })
+  if (Object.keys(fresh).length) cache.putAll(fresh, 3000)
   const blobs = UrlFetchApp.fetchAll(
     want.map((w) => ({ url: w.url, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true })),
   )
@@ -1087,7 +1138,10 @@ function loadImages(ids, size) {
     out[id] = dataUrl
     if (cacheIt) putChunks('img:' + size + ':' + id, dataUrl, 21600)
   }
-  blobs.forEach((r, k) => r.getResponseCode() === 200 && put(want[k].id, r.getBlob(), true))
+  blobs.forEach((r, k) => {
+    if (r.getResponseCode() === 200) put(want[k].id, r.getBlob(), true)
+    else if (want[k].cached) cache.remove('tl:' + want[k].id) // ลิงก์หมดอายุ ครั้งหน้าถามใหม่
+  })
   direct.forEach((id) => {
     try {
       put(id, DriveApp.getFileById(id).getBlob(), false)

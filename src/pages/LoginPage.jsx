@@ -10,7 +10,7 @@ import { page, rise, shake, stagger } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
 
 export default function LoginPage() {
-  const { user, login, loginError } = useSession()
+  const { user, login, loginError, notRegistered } = useSession()
   const [busy, setBusy] = useState(false)
   const [tries, setTries] = useState(0)
   const configured = isLoginConfigured()
@@ -54,6 +54,35 @@ export default function LoginPage() {
             </div>
             <Button size="sm" onClick={() => navigate('/')}>
               ไปที่ผลงาน
+            </Button>
+          </motion.div>
+        ) : notRegistered ? (
+          <motion.div className="register-card" role="alert" initial={{ opacity: 0, y: 12, ...shake }} animate={{ opacity: 1, y: 0 }}>
+            <span className="register-icon" aria-hidden="true">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 21a8 8 0 0 1 16 0" />
+                <path d="M19 3v4M17 5h4" />
+              </svg>
+            </span>
+            <h2>ต้องลงทะเบียนกับ LINE HR ก่อน</h2>
+            <p>{loginError}</p>
+            <ol className="register-steps">
+              <li>กดปุ่มด้านล่างเพื่อเปิดแชท LINE HR</li>
+              <li>ลงทะเบียนพนักงานตามขั้นตอนของ LINE HR</li>
+              <li>กลับมาที่หน้านี้ แล้วกด “ลองเข้าสู่ระบบอีกครั้ง”</li>
+            </ol>
+            {notRegistered.lineHrUrl ? (
+              <a className="btn btn-line btn-lg btn-block" href={notRegistered.lineHrUrl} target="_blank" rel="noopener noreferrer">
+                <span className="btn-label">
+                  <LineIcon size={24} /> ไปลงทะเบียนที่ LINE HR
+                </span>
+              </a>
+            ) : (
+              <p className="login-fine">ติดต่อฝ่าย HR เพื่อขอลิงก์ลงทะเบียน LINE HR</p>
+            )}
+            <Button variant="ghost" className="btn-block" onClick={start} disabled={busy}>
+              {busy ? <span className="spinner" aria-hidden="true" /> : null} ลองเข้าสู่ระบบอีกครั้ง
             </Button>
           </motion.div>
         ) : (

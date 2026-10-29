@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import Button from '../../components/Button.jsx'
+import ConfirmBox from '../../components/ConfirmBox.jsx'
 import CampaignEditor from './CampaignEditor.jsx'
 import { api } from '../../lib/api.js'
 import { linkProps } from '../../lib/router.js'
@@ -17,6 +18,23 @@ export default function Campaigns({ campaigns, reload }) {
   const [editing, setEditing] = useState(null)
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
+  const [deleting, setDeleting] = useState(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
+  const remove = async () => {
+    setDeleteBusy(true)
+    setError('')
+    try {
+      await api.deleteCampaign(deleting.id)
+      setDeleting(null)
+      await reload()
+    } catch (err) {
+      setError(err.message)
+      setDeleting(null)
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
 
   const togglePublish = async (c) => {
     setBusyId(c.id)
@@ -94,11 +112,31 @@ export default function Campaigns({ campaigns, reload }) {
                   {busyId === c.id ? <span className="spinner" aria-hidden="true" /> : null}
                   {c.published ? 'ซ่อน' : 'แสดงในหน้าโหวต'}
                 </Button>
+                <button type="button" className="link-danger campaign-delete" onClick={() => setDeleting(c)}>
+                  ลบ
+                </button>
               </div>
             </motion.article>
           ))}
         </motion.div>
       )}
+
+      <AnimatePresence>
+        {deleting && (
+          <ConfirmBox
+            key="delete"
+            title={`ลบ “${deleting.title}”?`}
+            confirmLabel="ลบกิจกรรม"
+            danger
+            busy={deleteBusy}
+            onConfirm={remove}
+            onCancel={() => setDeleting(null)}
+          >
+            <p>กิจกรรมจะหายจากแอปทันที ทั้งหน้าโหวตและแดชบอร์ด</p>
+            <p>คะแนน คำตอบ และรูปยังเก็บอยู่ในชีท “VOTE TOGETHER Data” และ Google Drive ถ้าลบผิดแจ้งผู้ดูแลระบบให้กู้คืนได้</p>
+          </ConfirmBox>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

@@ -1720,8 +1720,13 @@ h3 {
 .campaign-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 4px;
+}
+.campaign-delete {
+  margin-left: auto;
+  padding: 8px 4px;
 }
 .back-link {
   display: inline-flex;
@@ -2482,6 +2487,48 @@ button.dropzone {
   width: 100%;
   background: none;
   font: inherit;
+}
+
+/* ---------- not registered with LINE HR ---------- */
+.register-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+  text-align: center;
+}
+.register-icon {
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.register-card h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.register-card > p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.register-steps {
+  margin: 0;
+  padding: 12px 14px 12px 34px;
+  border-radius: 14px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-2);
+}
+.register-card a.btn {
+  text-decoration: none;
 }
 
 /* ---------- keyframes ---------- */

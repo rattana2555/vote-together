@@ -12,12 +12,19 @@ export function SessionProvider({ children }) {
   const [ready, setReady] = useState(false)
   const [welcome, setWelcome] = useState(false)
   const [loginError, setLoginError] = useState('')
+  // Not registered with LINE HR yet: the login page shows a button to the LINE HR chat.
+  const [notRegistered, setNotRegistered] = useState(null)
+  const fail = useCallback((err) => {
+    setLoginError(err.message || 'เข้าสู่ระบบไม่สำเร็จ')
+    setNotRegistered(err.data?.code === 'NOT_REGISTERED' ? { lineHrUrl: err.data.lineHrUrl || '' } : null)
+  }, [])
 
   const completeLogin = useCallback(async (idToken) => {
     const res = await api.login(idToken)
     session.token = res.token
     setUser(res.user)
     setLoginError('')
+    setNotRegistered(null)
     setWelcome(true)
   }, [])
 
@@ -42,7 +49,10 @@ export function SessionProvider({ children }) {
             navigate(takeReturnTo() || '/', { replace: true })
           }
         } catch (err) {
-          if (alive) setLoginError(err.message || 'เข้าสู่ระบบไม่สำเร็จ')
+          if (alive) {
+            fail(err)
+            if (err.data?.code === 'NOT_REGISTERED') navigate('/login', { replace: true })
+          }
         }
       }
       if (alive) setReady(true)
@@ -50,22 +60,23 @@ export function SessionProvider({ children }) {
     return () => {
       alive = false
     }
-  }, [completeLogin])
+  }, [completeLogin, fail])
 
   const login = useCallback(
     async (returnTo = '/', opts) => {
       setLoginError('')
+      setNotRegistered(null)
       try {
         const idToken = await startLineLogin(returnTo, opts)
         if (!idToken) return
         await completeLogin(idToken)
         navigate(takeReturnTo() || returnTo, { replace: true })
       } catch (err) {
-        setLoginError(err.message || 'เข้าสู่ระบบไม่สำเร็จ')
+        fail(err)
         throw err
       }
     },
-    [completeLogin],
+    [completeLogin, fail],
   )
 
   const logout = useCallback(() => {
@@ -83,10 +94,11 @@ export function SessionProvider({ children }) {
       login,
       logout,
       loginError,
+      notRegistered,
       welcome,
       dismissWelcome: () => setWelcome(false),
     }),
-    [user, ready, login, logout, loginError, welcome],
+    [user, ready, login, logout, loginError, notRegistered, welcome],
   )
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

@@ -40,6 +40,8 @@ const USERS = {
   'U-dev-voter': { uid: 'U-dev-voter', empId: '90002', name: 'ทดสอบ พนักงาน', nick: 'โหวต', branch: 'W1', dept: 'ขาย', avatarId: 'av2' },
 }
 let adminIds = ['90001']
+let hrLink = ''
+const hrUrl = () => (hrLink ? (hrLink.startsWith('@') ? `https://line.me/R/ti/p/${encodeURIComponent(hrLink)}` : hrLink) : '')
 const display = (u) => `${u.name} (${u.nick})`
 const isAdmin = (u) => adminIds.includes(u.empId)
 const profile = (u) => ({
@@ -241,7 +243,9 @@ const actions = {
     const idToken = String(b.idToken || '')
     if (!idToken.startsWith('mock-')) throw new Fail(401, 'LINE_VERIFY_FAILED', 'ยืนยันตัวตนกับ LINE ไม่สำเร็จ หรือหมดอายุ กรุณาเข้าสู่ระบบใหม่')
     const u = USERS[idToken.slice(5)]
-    if (!u) throw new Fail(403, 'NOT_REGISTERED', 'ไม่พบบัญชี LINE “ผู้ทดสอบ” ในรายชื่อพนักงานที่ลงทะเบียนกับ LINE HR ถ้าเพิ่งเปลี่ยนชื่อหรือรูปโปรไฟล์ LINE แจ้งผู้ดูแลกิจกรรมได้เลย')
+    if (!u) {
+      throw new Fail(403, 'NOT_REGISTERED', 'บัญชี LINE “ผู้ทดสอบ” ยังไม่ได้ลงทะเบียนพนักงาน กรุณาลงทะเบียนผ่านระบบของ LINE HR ก่อน แล้วกลับมาเข้าสู่ระบบอีกครั้ง', { lineHrUrl: hrUrl() })
+    }
     const token = randomBytes(16).toString('hex')
     sessions.set(token, u.uid)
     return { token, user: profile(u) }
@@ -370,6 +374,12 @@ const actions = {
     else campaigns.push(next)
     return { campaign: strip(next), detected: source === 'sheet' ? detected(next) : null }
   },
+  deleteCampaign: (b, u) => {
+    requireAdmin(u)
+    const c = byId(b.campaignId)
+    campaigns.splice(campaigns.indexOf(c), 1)
+    return { campaignId: c.id }
+  },
   setPublished: (b, u) => {
     requireAdmin(u)
     const c = byId(b.campaignId)
@@ -396,6 +406,19 @@ const actions = {
     if (votesOf(c).some((v) => v.entryId === b.entryId)) throw new Fail(409, 'HAS_VOTES', 'ผลงานนี้มีคนโหวตแล้ว ลบไม่ได้')
     c.entries = c.entries.filter((e) => e.id !== b.entryId)
     return { entryId: b.entryId }
+  },
+  getLineHrLink: (b, u) => {
+    requireAdmin(u)
+    return { value: hrLink, url: hrUrl() }
+  },
+  saveLineHrLink: (b, u) => {
+    requireAdmin(u)
+    const v = String(b.value || '').trim()
+    if (v && !/^@[\w.\-]+$/.test(v) && !/^https:\/\/(line\.me|lin\.ee|liff\.line\.me)\/\S+$/.test(v)) {
+      throw new Fail(400, 'BAD_LINK', 'ใส่ LINE ID ที่ขึ้นต้นด้วย @ หรือลิงก์ https://lin.ee/… / https://line.me/…')
+    }
+    hrLink = v
+    return { value: v, url: hrUrl() }
   },
   employees: (b, u) => {
     requireAdmin(u)
