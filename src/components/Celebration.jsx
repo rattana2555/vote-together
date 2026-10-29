@@ -5,7 +5,7 @@ import { spring } from '../lib/motion.js'
 
 const COLORS = ['#7657FF', '#55C7FF', '#FF8D9C', '#E9E5FF', '#9B85FF', '#FFD38A']
 
-export default function Celebration({ entry, onDone }) {
+export default function Celebration({ message, title = 'บันทึกคะแนนแล้ว', onDone }) {
   const reduce = useReducedMotion()
   const particles = useMemo(
     () =>
@@ -56,10 +56,8 @@ export default function Celebration({ entry, onDone }) {
         <span className="celebrate-check">
           <CheckDraw size={84} delay={0.1} />
         </span>
-        <h3>บันทึกคะแนนแล้ว</h3>
-        <p>
-          ขอบคุณที่ร่วมโหวตให้ <b>“{entry?.title}”</b>
-        </p>
+        <h3>{title}</h3>
+        <p>{message}</p>
       </motion.div>
     </motion.div>
   )

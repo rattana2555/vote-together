@@ -6,6 +6,7 @@ import DriveImg from '../../components/DriveImg.jsx'
 import { api } from '../../lib/api.js'
 import { primeImage, setImageScope } from '../../lib/images.js'
 import { resizeImage } from '../../lib/resize.js'
+import FormBuilder from './FormBuilder.jsx'
 import { rise, shake, spring, stagger } from '../../lib/motion.js'
 
 // <input type="datetime-local"> works in local time; the backend stores an ISO string.
@@ -246,7 +247,7 @@ export default function CampaignEditor({ initial, onBack, onSaved }) {
     subtitle: initial.subtitle || '',
     endsAt: toLocalInput(initial.endsAt),
     showCounts: Boolean(initial.showCounts),
-    source: initial.source || 'app',
+    source: initial.source || 'form',
     sheetUrl: initial.sheetUrl || '',
   }))
   const [entries, setEntries] = useState([])
@@ -277,7 +278,7 @@ export default function CampaignEditor({ initial, onBack, onSaved }) {
       const d = await api.saveCampaign({ ...form, id: initial.id, endsAt: fromLocalInput(form.endsAt) })
       setDetected(d.detected)
       setState('saved')
-      onSaved({ ...d.campaign, active: initial.active })
+      onSaved(d.campaign)
     } catch (err) {
       setState('idle')
       setError(err.message)
@@ -297,15 +298,16 @@ export default function CampaignEditor({ initial, onBack, onSaved }) {
       <form className="settings" onSubmit={save}>
         <div className="settings-head">
           <h3>{isNew ? 'สร้างกิจกรรมโหวตใหม่' : 'แก้ไขกิจกรรม'}</h3>
-          {initial.active && <span className="tag tag-live">กำลังใช้งาน</span>}
+          {initial.published && <span className="tag tag-live">แสดงอยู่ในหน้าโหวต</span>}
         </div>
 
         <div className="field field-wide">
-          <span className="field-label">ผลงานมาจากไหน</span>
+          <span className="field-label">ประเภทกิจกรรม</span>
           <div className="segmented" role="radiogroup">
             {[
-              ['app', 'อัปโหลดรูปในแอป'],
-              ['sheet', 'ดึงจาก Google Sheet (Form)'],
+              ['form', 'แบบสอบถาม / โพล'],
+              ['app', 'โหวตภาพ · อัปโหลดในแอป'],
+              ['sheet', 'โหวตภาพ · Google Sheet'],
             ].map(([v, label]) => (
               <button
                 key={v}
@@ -383,7 +385,10 @@ export default function CampaignEditor({ initial, onBack, onSaved }) {
       {!isNew && initial.source === 'app' && form.source === 'app' && (
         <EntryManager campaignId={initial.id} entries={entries} setEntries={setEntries} />
       )}
-      {isNew && form.source === 'app' && <p className="hint">กด “สร้างกิจกรรม” ก่อน แล้วจะเพิ่มรูปผลงานได้ทันที</p>}
+      {!isNew && initial.source === 'form' && form.source === 'form' && <FormBuilder campaignId={initial.id} />}
+      {isNew && form.source !== 'sheet' && (
+        <p className="hint">กด “สร้างกิจกรรม” ก่อน แล้วจะ{form.source === 'form' ? 'สร้างคำถาม' : 'เพิ่มรูปผลงาน'}ได้ทันที</p>
+      )}
     </motion.div>
   )
 }

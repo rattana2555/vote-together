@@ -1,96 +1,53 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AnimatePresence, LayoutGroup, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import Hero from '../components/Hero.jsx'
-import EntryCard from '../components/EntryCard.jsx'
-import DetailView from '../components/DetailView.jsx'
-import ConfirmDialog from '../components/ConfirmDialog.jsx'
-import Celebration from '../components/Celebration.jsx'
-import Button, { LineIcon } from '../components/Button.jsx'
-import { GallerySkeleton } from '../components/Skeleton.jsx'
+import Button from '../components/Button.jsx'
 import { api } from '../lib/api.js'
-import { ENV, isLoginConfigured } from '../config.js'
-import { navigate } from '../lib/router.js'
-import { page } from '../lib/motion.js'
+import { ENV } from '../config.js'
+import { linkProps } from '../lib/router.js'
+import { easeOut, page } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
 
+export const SOURCE_LABEL = { app: 'โหวตภาพ', sheet: 'โหวตภาพ', form: 'แบบสอบถาม' }
+
+export const fmtDeadline = (c) =>
+  c.endsAt
+    ? `${c.closed ? 'ปิดแล้วเมื่อ' : 'ปิด'} ${new Date(c.endsAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+    : 'ยังไม่กำหนดวันปิด'
+
+function TypeIcon({ source }) {
+  return source === 'form' ? (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="3" width="16" height="18" rx="3" />
+      <path d="M8 8h8M8 12h8M8 16h5" />
+    </svg>
+  ) : (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <circle cx="9" cy="10" r="2" />
+      <path d="M21 16l-5-5-8 9" />
+    </svg>
+  )
+}
+
 export default function HomePage() {
-  const { user, ready, votedEntryId, setVotedEntryId } = useSession()
-  const [campaign, setCampaign] = useState(null)
-  const [entries, setEntries] = useState(null)
-  const [loadError, setLoadError] = useState('')
-  const [openId, setOpenId] = useState(null)
-  const [selectedId, setSelectedId] = useState(null)
-  const [status, setStatus] = useState('idle')
-  const [voteError, setVoteError] = useState('')
-  const [errorKey, setErrorKey] = useState(0)
-  const [celebrate, setCelebrate] = useState(null)
-  const galleryRef = useRef(null)
+  const { user, ready } = useSession()
+  const [campaigns, setCampaigns] = useState(null)
+  const [error, setError] = useState('')
+  const listRef = useRef(null)
 
-  useEffect(() => {
-    if (ENV.apiBase) api.campaign().then(setCampaign, () => {})
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      setCampaigns(await api.openCampaigns())
+    } catch (err) {
+      setError(err.message)
+    }
   }, [])
 
-  const loadEntries = useCallback(async () => {
-    setLoadError('')
-    try {
-      const [list, me] = await Promise.all([api.entries(), api.me()])
-      setEntries(list)
-      setVotedEntryId(me.votedEntryId ?? null)
-    } catch (err) {
-      setLoadError(err.message)
-    }
-  }, [setVotedEntryId])
-
   useEffect(() => {
-    if (user) loadEntries()
-    else setEntries(null)
-  }, [user, loadEntries])
-
-  const closed = Boolean(campaign?.closed)
-  const openEntry = entries?.find((e) => e.id === openId)
-  const selectedEntry = entries?.find((e) => e.id === selectedId)
-
-  const requestVote = (id) => {
-    setVoteError('')
-    setStatus('idle')
-    setSelectedId(id)
-    setOpenId(null)
-  }
-
-  const cancelVote = useCallback(() => {
-    setSelectedId(null)
-    setStatus('idle')
-    setVoteError('')
-  }, [])
-
-  const confirmVote = async () => {
-    const id = selectedId
-    setStatus('submitting')
-    setVoteError('')
-    try {
-      const res = await api.vote(id)
-      if (!res?.ok || res.entryId !== id) throw new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการบันทึกคะแนน')
-      setVotedEntryId(res.entryId)
-      if (typeof res.votes === 'number') {
-        setEntries((list) => list.map((e) => (e.id === id ? { ...e, votes: res.votes } : e)))
-      }
-      setStatus('success')
-      setSelectedId(null)
-      setCelebrate(entries.find((e) => e.id === id))
-    } catch (err) {
-      if (err.status === 409 && err.data?.votedEntryId) setVotedEntryId(err.data.votedEntryId)
-      if (err.status === 401) {
-        navigate('/login')
-        return
-      }
-      setStatus('error')
-      setVoteError(err.message || 'บันทึกคะแนนไม่สำเร็จ กรุณาลองอีกครั้ง')
-      setErrorKey((k) => k + 1)
-    }
-  }
-
-  const closeDetail = useCallback(() => setOpenId(null), [])
-  const endCelebrate = useCallback(() => setCelebrate(null), [])
+    if (ENV.apiBase && ready) load()
+  }, [load, ready, user])
 
   let body
   if (!ENV.apiBase) {
@@ -99,108 +56,82 @@ export default function HomePage() {
         <p>ระบบโหวตกำลังจะเปิดเร็ว ๆ นี้</p>
       </div>
     )
-  } else if (!user) {
-    body = ready ? (
-      <div className="empty gate">
-        <p>
-          <b>ผลงานในกิจกรรมนี้เปิดให้เฉพาะพนักงาน</b>
-          <br />
-          เข้าสู่ระบบด้วย LINE ที่ลงทะเบียนกับบริษัทเพื่อดูผลงานและโหวต
-        </p>
-        {isLoginConfigured() && (
-          <Button variant="line" onClick={() => navigate('/login')}>
-            <LineIcon /> เข้าสู่ระบบด้วย LINE
-          </Button>
-        )}
-      </div>
-    ) : (
-      <GallerySkeleton />
-    )
-  } else if (loadError) {
+  } else if (error) {
     body = (
       <div className="empty">
-        <p>{loadError}</p>
-        <Button variant="ghost" onClick={loadEntries}>
+        <p>{error}</p>
+        <Button variant="ghost" onClick={load}>
           ลองโหลดใหม่
         </Button>
       </div>
     )
-  } else if (!entries) {
-    body = <GallerySkeleton />
-  } else if (entries.length === 0) {
+  } else if (!campaigns) {
+    body = (
+      <div className="event-list">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="event-card shimmer" style={{ height: 112 }} />
+        ))}
+      </div>
+    )
+  } else if (!campaigns.length) {
     body = (
       <div className="empty">
-        <p>ยังไม่มีผลงานในกิจกรรมนี้</p>
+        <p>ตอนนี้ยังไม่มีกิจกรรมที่เปิดให้โหวต</p>
       </div>
     )
   } else {
     body = (
-      <LayoutGroup>
-        <div className="gallery">
-          {entries.map((entry, i) => (
-            <EntryCard
-              key={entry.id}
-              entry={entry}
-              index={i}
-              showCounts={campaign?.showCounts || user?.role === 'admin'}
-              isVoted={votedEntryId === entry.id}
-              isSelected={selectedId === entry.id}
-              onOpen={setOpenId}
-            />
-          ))}
-        </div>
-        <AnimatePresence>
-          {openEntry && (
-            <DetailView
-              key={openEntry.id}
-              entry={openEntry}
-              showCounts={campaign?.showCounts || user?.role === 'admin'}
-              votedEntryId={votedEntryId}
-              closed={closed}
-              user={user}
-              onClose={closeDetail}
-              onVote={requestVote}
-            />
-          )}
-        </AnimatePresence>
-      </LayoutGroup>
+      <div className="event-list">
+        {campaigns.map((c, i) => (
+          <motion.a
+            key={c.id}
+            {...linkProps(`/c/${c.id}`)}
+            className={`event-card${c.closed ? ' is-closed' : ''}`}
+            initial={{ opacity: 0, y: 24, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.5, delay: i * 0.07, ease: easeOut }}
+            whileHover={{ y: -4 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <span className={`event-icon ${c.source === 'form' ? 'is-form' : ''}`}>
+              <TypeIcon source={c.source} />
+            </span>
+            <span className="event-body">
+              <span className="event-type">
+                {SOURCE_LABEL[c.source]}
+                {c.done === true && <span className="event-status"> · ร่วมแล้ว ✓</span>}
+                {c.done === false && !c.closed && <span className="event-status is-todo"> · ยังไม่ได้ร่วม</span>}
+              </span>
+              <b title={c.title}>{c.title}</b>
+              {c.subtitle && <span className="event-sub">{c.subtitle}</span>}
+              <span className="event-meta">{fmtDeadline(c)}</span>
+            </span>
+            <span className="event-side">
+              {c.done === true && <span className="tag tag-live">ร่วมแล้ว ✓</span>}
+              {c.done === false && !c.closed && <span className="tag tag-soft">ยังไม่ได้ร่วม</span>}
+              {c.closed && <span className="tag">ปิดแล้ว</span>}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+            </span>
+          </motion.a>
+        ))}
+      </div>
     )
   }
 
   return (
     <motion.main {...page} className="page">
-      <Hero
-        campaign={campaign}
-        entryCount={entries?.length}
-        onStart={() => galleryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-      />
-
-      <section ref={galleryRef} className="section" id="gallery" aria-labelledby="gallery-title">
+      <Hero count={campaigns?.length} onStart={() => listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
+      <section ref={listRef} className="section" id="events" aria-labelledby="events-title">
         <div className="section-head">
           <div>
-            <h2 id="gallery-title">ผลงานทั้งหมด</h2>
-            <p>{campaign?.subtitle || 'แตะที่ภาพเพื่อดูรายละเอียดและโหวต'}</p>
+            <h2 id="events-title">กิจกรรมที่เปิดอยู่</h2>
+            <p>เลือกกิจกรรมเพื่อเข้าไปโหวตหรือตอบคำถาม 1 บัญชี LINE ร่วมได้ 1 ครั้งต่อกิจกรรม</p>
           </div>
-          {user && votedEntryId && <span className="pill pill-success">คุณโหวตแล้ว · ขอบคุณที่ร่วมสร้างช่วงเวลานี้</span>}
-          {closed && !votedEntryId && <span className="pill">ปิดรับโหวตแล้ว</span>}
         </div>
         {body}
       </section>
-
-      <AnimatePresence>
-        {selectedEntry && (
-          <ConfirmDialog
-            key="confirm"
-            entry={selectedEntry}
-            status={status}
-            error={voteError}
-            errorKey={errorKey}
-            onConfirm={confirmVote}
-            onCancel={cancelVote}
-          />
-        )}
-      </AnimatePresence>
-      <AnimatePresence>{celebrate && <Celebration key="celebrate" entry={celebrate} onDone={endCelebrate} />}</AnimatePresence>
     </motion.main>
   )
 }

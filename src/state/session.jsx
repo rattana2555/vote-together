@@ -9,7 +9,6 @@ const SessionContext = createContext(null)
 
 export function SessionProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [votedEntryId, setVotedEntryId] = useState(null)
   const [ready, setReady] = useState(false)
   const [welcome, setWelcome] = useState(false)
   const [loginError, setLoginError] = useState('')
@@ -18,7 +17,6 @@ export function SessionProvider({ children }) {
     const res = await api.login(idToken)
     session.token = res.token
     setUser(res.user)
-    setVotedEntryId(res.votedEntryId ?? null)
     setLoginError('')
     setWelcome(true)
   }, [])
@@ -32,7 +30,6 @@ export function SessionProvider({ children }) {
           const me = await api.me()
           if (!alive) return
           setUser(me.user)
-          setVotedEntryId(me.votedEntryId ?? null)
         } catch {
           /* expired session: fall through to LINE */
         }
@@ -76,7 +73,6 @@ export function SessionProvider({ children }) {
     lineLogout()
     clearImageCache()
     setUser(null)
-    setVotedEntryId(null)
     navigate('/')
   }, [])
 
@@ -84,15 +80,13 @@ export function SessionProvider({ children }) {
     () => ({
       user,
       ready,
-      votedEntryId,
-      setVotedEntryId,
       login,
       logout,
       loginError,
       welcome,
       dismissWelcome: () => setWelcome(false),
     }),
-    [user, ready, votedEntryId, login, logout, loginError, welcome],
+    [user, ready, login, logout, loginError, welcome],
   )
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

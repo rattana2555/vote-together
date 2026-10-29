@@ -7,10 +7,7 @@ import { rise, stagger } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
 import { navigate } from '../lib/router.js'
 
-const fmtDate = (iso) =>
-  new Date(iso).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-
-export default function Hero({ campaign, entryCount, onStart }) {
+export default function Hero({ count, onStart }) {
   const { user } = useSession()
   const reduce = useReducedMotion()
   const { scrollY } = useScroll()
@@ -20,12 +17,10 @@ export default function Hero({ campaign, entryCount, onStart }) {
   return (
     <section className="hero">
       <motion.div className="hero-copy" variants={stagger(0.09, 0.2)} initial="hidden" animate="show">
-        {campaign && (
-          <motion.span variants={rise} className="eyebrow">
-            <span className="eyebrow-dot" />
-            {campaign.title}
-          </motion.span>
-        )}
+        <motion.span variants={rise} className="eyebrow">
+          <span className="eyebrow-dot" />
+          กิจกรรมโหวตภายในรัตนไพบูลย์
+        </motion.span>
         <motion.h1 variants={rise} className="hero-title">
           VOTE <span className="grad-text">TOGETHER</span>
         </motion.h1>
@@ -37,7 +32,7 @@ export default function Hero({ campaign, entryCount, onStart }) {
         </motion.p>
         <motion.div variants={rise} className="hero-cta">
           <Button size="lg" onClick={onStart}>
-            เริ่มโหวตเลย
+            ดูกิจกรรม
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 5v14M5 12l7 7 7-7" />
             </svg>
@@ -48,20 +43,13 @@ export default function Hero({ campaign, entryCount, onStart }) {
             </Button>
           )}
         </motion.div>
-        {campaign && (
+        {typeof count === 'number' && (
           <motion.ul variants={rise} className="hero-facts">
-            {typeof entryCount === 'number' && (
-              <li>
-                <b>{entryCount}</b> ผลงาน
-              </li>
-            )}
-            {campaign.endsAt && (
-              <li>
-                {campaign.closed ? 'ปิดโหวตแล้ว' : 'ปิดโหวต'} <b>{fmtDate(campaign.endsAt)}</b>
-              </li>
-            )}
             <li>
-              <b>1</b> สิทธิ์ / บัญชี LINE
+              <b>{count}</b> กิจกรรมที่เปิดอยู่
+            </li>
+            <li>
+              <b>1</b> สิทธิ์ / บัญชี LINE / กิจกรรม
             </li>
           </motion.ul>
         )}

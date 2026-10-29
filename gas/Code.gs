@@ -5,14 +5,15 @@
  * - กิจกรรม: แอดมินสร้างได้หลายกิจกรรมในแอป แต่ละกิจกรรมเลือกแหล่งผลงานได้ 2 แบบ
  *     · 'app'   อัปโหลดรูปผ่านแอป (ไฟล์อยู่ในโฟลเดอร์ VOTE TOGETHER Uploads · ข้อมูลอยู่ในชีท VOTE TOGETHER Data)
  *     · 'sheet' ดึงจากชีทคำตอบ Google Form (คะแนนเก็บในแท็บ VOTE_TOGETHER_VOTES ของชีทนั้น)
- *   เปิดใช้ได้ทีละ 1 กิจกรรม (ACTIVE_CAMPAIGN) · 1 บัญชี LINE = 1 โหวต / กิจกรรม
+ *     · 'form'  แบบสอบถาม/โพลที่สร้างคำถามเองในแอป (คำถามอยู่แท็บ QUESTIONS · คำตอบอยู่แท็บ RESPONSES)
+ *   แสดงในหน้าโหวตได้พร้อมกันหลายกิจกรรม (คอลัมน์ 'แสดงในหน้าโหวต') · 1 บัญชี LINE = 1 โหวต/คำตอบ ต่อกิจกรรม
  * - รูป: ดึงผ่านสคริปต์นี้เท่านั้น (ไม่ต้องแชร์ไฟล์ใน Drive เป็นสาธารณะ) และให้เฉพาะคนที่ login แล้ว
  *
  * Deploy: Web app · Execute as: Me · Who has access: Anyone
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v2.2'
+const VER = 'v3.0'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -33,10 +34,13 @@ const VOTES_TAB = 'VOTE_TOGETHER_VOTES'
 const VOTES_HEADER = ['เวลา', 'LINE userId', 'รหัสพนักงาน', 'ชื่อผู้โหวต', 'รหัสผลงาน', 'ชื่อผลงาน']
 
 const DATA_TABS = {
-  CAMPAIGNS: ['รหัสกิจกรรม', 'ชื่อกิจกรรม', 'คำโปรย', 'ปิดโหวต', 'โชว์คะแนน', 'แหล่งผลงาน', 'ลิงก์ชีท', 'สร้างเมื่อ', 'สร้างโดย'],
+  CAMPAIGNS: ['รหัสกิจกรรม', 'ชื่อกิจกรรม', 'คำโปรย', 'ปิดโหวต', 'โชว์คะแนน', 'แหล่งผลงาน', 'ลิงก์ชีท', 'สร้างเมื่อ', 'สร้างโดย', 'แสดงในหน้าโหวต'],
   ENTRIES: ['รหัสกิจกรรม', 'รหัสผลงาน', 'ชื่อผลงาน', 'เจ้าของผลงาน', 'รหัสรูป', 'กว้าง', 'สูง', 'เพิ่มเมื่อ', 'เพิ่มโดย'],
   VOTES: ['รหัสกิจกรรม'].concat(VOTES_HEADER),
+  QUESTIONS: ['รหัสกิจกรรม', 'รหัสคำถาม', 'ลำดับ', 'ประเภท', 'คำถาม', 'ข้อมูล (JSON)'],
+  RESPONSES: ['รหัสกิจกรรม', 'เวลา', 'LINE userId', 'รหัสพนักงาน', 'ชื่อผู้ตอบ', 'คำตอบ (JSON)', 'คำตอบ (อ่านง่าย)'],
 }
+const QUESTION_TYPES = ['single', 'multi', 'text', 'rating']
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 const SESSION_HOURS = 72
 const IMAGE_SIZES = { s: 's640', l: 's1600', a: 's200' }
@@ -73,30 +77,40 @@ function setup() {
   UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify?access_token=x', { muteHttpExceptions: true })
   sessionSecret()
   dataBook()
-  const cfg = getConfig()
-  console.log('OK · %s · ผู้ใช้ %s คน · กิจกรรม "%s" ผลงาน %s ชิ้น', VER, Object.keys(getUsers()).length, cfg.title, readEntries(cfg).length)
+  console.log('OK · %s · ผู้ใช้ %s คน · กิจกรรม %s รายการ', VER, Object.keys(getUsers()).length, listCampaigns().length)
 }
 
 const ACTIONS = {
-  campaign: () => ({ campaign: publicCampaign(getConfig()) }),
+  // หน้าแรก: รายการกิจกรรมที่แสดงอยู่ (ถ้า login แล้วบอกด้วยว่าเข้าร่วมแล้วหรือยัง)
+  openCampaigns: (body) => {
+    const s = readSession(body.token)
+    const u = s && getUsers()[s.uid]
+    return {
+      campaigns: listCampaigns()
+        .filter((c) => c.published)
+        .map((c) => Object.assign(publicCampaign(c), { done: u ? hasParticipated(c, u.uid) : null })),
+    }
+  },
+
+  campaign: (body) => {
+    const s = readSession(body.token)
+    return { campaign: publicCampaign(voterCampaign(body, s && getUsers()[s.uid])) }
+  },
 
   // ตัวเลขสรุปสำหรับเช็คว่าระบบอ่านชีท/รูปได้ (ไม่มีข้อมูลส่วนตัว)
   health: () => {
-    const cfg = getConfig()
-    const users = getUsers()
+    const list = listCampaigns()
     return {
-      users: Object.keys(users).length,
-      campaigns: listCampaigns().length,
-      activeSource: cfg.source,
-      entries: readEntries(cfg).length,
-      votes: readVotes(cfg).length,
+      users: Object.keys(getUsers()).length,
+      campaigns: list.length,
+      published: list.filter((c) => c.published).length,
     }
   },
 
   login: (body) => {
     const line = verifyLineIdToken(body.idToken)
     const u = findEmployee(line)
-    if (u) return sessionFor(u)
+    if (u) return sessionFor(u, line.picture)
     console.warn('login not matched sub=%s name=%s', line.sub, line.name)
     throw vtError(
       403,
@@ -107,15 +121,53 @@ const ACTIONS = {
 
   me: (body) => {
     const u = requireUser(body)
-    return { user: profile(u), votedEntryId: votedEntryOf(getConfig(), u.uid) }
+    const s = readSession(body.token)
+    return { user: profile(u, s && s.pic) }
+  },
+
+  /* ── แบบสอบถาม/โพล ── */
+
+  form: (body) => {
+    const u = requireUser(body)
+    const cfg = voterCampaign(body, u)
+    if (cfg.source !== 'form') return { questions: [], myAnswers: null, results: null }
+    const qs = readQuestions(cfg)
+    const all = readResponses(cfg)
+    const mine = all.find((r) => r.uid === u.uid)
+    return {
+      questions: qs,
+      myAnswers: mine ? mine.answers : null,
+      results: mine && (cfg.showCounts || isAdmin(u)) ? aggregate(qs, all, false) : null,
+    }
+  },
+
+  submitResponse: (body) => {
+    const u = requireUser(body)
+    const cfg = voterCampaign(body, u)
+    if (cfg.source !== 'form') throw vtError(400, 'NOT_FORM', 'กิจกรรมนี้ไม่ใช่แบบสอบถาม')
+    if (isClosed(cfg)) throw vtError(403, 'CLOSED', 'ปิดรับคำตอบแล้ว')
+    const qs = readQuestions(cfg)
+    const answers = cleanAnswers(qs, body.answers || {})
+    const lock = LockService.getScriptLock()
+    if (!lock.tryLock(20000)) throw vtError(503, 'BUSY', 'มีคนส่งคำตอบพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง')
+    try {
+      if (readResponses(cfg).some((r) => r.uid === u.uid)) throw vtError(409, 'ALREADY_ANSWERED', 'บัญชีนี้ส่งคำตอบไปแล้ว')
+      appendDataRow('RESPONSES', [cfg.id, nowText(), u.uid, u.empId, displayName(u), JSON.stringify(answers), readableAnswers(qs, answers)])
+      return { answers: answers, results: cfg.showCounts ? aggregate(qs, readResponses(cfg), false) : null }
+    } finally {
+      lock.releaseLock()
+    }
   },
 
   entries: (body) => {
     const u = requireUser(body)
-    const cfg = getConfig()
+    const cfg = voterCampaign(body, u)
+    const votes = readVotes(cfg)
     const reveal = cfg.showCounts || isAdmin(u)
-    const counts = reveal ? countVotes(readVotes(cfg)) : null
+    const counts = reveal ? countVotes(votes) : null
+    const mine = votes.find((v) => v.uid === u.uid)
     return {
+      votedEntryId: mine ? mine.entryId : null,
       entries: readEntries(cfg).map((e) => ({
         id: e.id,
         title: e.title,
@@ -138,7 +190,7 @@ const ACTIONS = {
 
   vote: (body) => {
     const u = requireUser(body)
-    const cfg = getConfig()
+    const cfg = voterCampaign(body, u)
     if (isClosed(cfg)) throw vtError(403, 'CLOSED', 'ปิดรับโหวตแล้ว')
     const entry = readEntries(cfg).find((e) => e.id === String(body.entryId))
     if (!entry) throw vtError(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้ อาจถูกลบออกไปแล้ว')
@@ -161,7 +213,7 @@ const ACTIONS = {
 
   stats: (body) => {
     requireAdmin(body)
-    const cfg = body.campaignId ? campaignById(body.campaignId) : getConfig()
+    const cfg = campaignById(body.campaignId)
     const votes = readVotes(cfg)
     const counts = countVotes(votes)
     return {
@@ -176,8 +228,7 @@ const ACTIONS = {
 
   campaigns: (body) => {
     requireAdmin(body)
-    const active = getConfig().id
-    return { campaigns: listCampaigns().map((c) => Object.assign({}, c, { active: c.id === active, closed: isClosed(c) })) }
+    return { campaigns: listCampaigns().map((c) => Object.assign({}, c, { closed: isClosed(c) })) }
   },
 
   campaignEntries: (body) => {
@@ -200,15 +251,16 @@ const ACTIONS = {
       subtitle: String(c.subtitle || '').trim(),
       endsAt: String(c.endsAt || '').trim(),
       showCounts: Boolean(c.showCounts),
-      source: c.source === 'sheet' ? 'sheet' : 'app',
+      source: ['sheet', 'form'].indexOf(c.source) !== -1 ? c.source : 'app',
       sheetUrl: c.source === 'sheet' ? String(c.sheetUrl || '').trim() : '',
       createdAt: prev ? prev.createdAt : nowText(),
       createdBy: prev ? prev.createdBy : displayName(admin),
+      published: prev ? prev.published : false,
     }
     if (!next.title) throw vtError(400, 'BAD_TITLE', 'กรุณาใส่ชื่อกิจกรรม')
     if (next.endsAt && isNaN(new Date(next.endsAt).getTime())) throw vtError(400, 'BAD_DATE', 'วันปิดโหวตไม่ถูกต้อง')
-    if (prev && (prev.source !== next.source || prev.sheetUrl !== next.sheetUrl) && readVotes(prev).length) {
-      throw vtError(409, 'HAS_VOTES', 'กิจกรรมนี้มีคนโหวตแล้ว เปลี่ยนแหล่งผลงานไม่ได้ ให้สร้างกิจกรรมใหม่แทน')
+    if (prev && (prev.source !== next.source || prev.sheetUrl !== next.sheetUrl) && (readVotes(prev).length || readResponses(prev).length)) {
+      throw vtError(409, 'HAS_VOTES', 'กิจกรรมนี้มีคนโหวต/ตอบแล้ว เปลี่ยนประเภทไม่ได้ ให้สร้างกิจกรรมใหม่แทน')
     }
 
     let detected = null
@@ -227,11 +279,11 @@ const ACTIONS = {
     return { campaign: next, detected: detected }
   },
 
-  activateCampaign: (body) => {
+  setPublished: (body) => {
     requireAdmin(body)
     const cfg = campaignById(body.campaignId)
-    PropertiesService.getScriptProperties().setProperty('ACTIVE_CAMPAIGN', cfg.id)
-    return { campaign: publicCampaign(cfg) }
+    writeCampaign(Object.assign({}, cfg, { published: Boolean(body.published) }))
+    return { campaign: publicCampaign(campaignById(cfg.id)) }
   },
 
   addEntry: (body) => {
@@ -243,11 +295,7 @@ const ACTIONS = {
     if (!title) throw vtError(400, 'BAD_TITLE', 'กรุณาใส่ชื่อผลงาน')
     if (!author) throw vtError(400, 'BAD_AUTHOR', 'กรุณาใส่ชื่อเจ้าของผลงาน')
 
-    const m = String(body.image || '').match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/)
-    if (!m) throw vtError(400, 'BAD_IMAGE', 'ไฟล์รูปไม่ถูกต้อง รองรับ JPG, PNG, WEBP')
-    const bytes = Utilities.base64Decode(m[2])
-    if (bytes.length > MAX_UPLOAD_BYTES) throw vtError(413, 'TOO_LARGE', 'รูปใหญ่เกิน 4MB')
-    const file = uploadFolder().createFile(Utilities.newBlob(bytes, m[1], cfg.id + '-' + Date.now() + '.jpg'))
+    const file = saveUpload(cfg, body.image)
 
     const entry = {
       id: file.getId(),
@@ -282,6 +330,39 @@ const ACTIONS = {
     return { entryId: entryId }
   },
 
+  campaignQuestions: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    return { questions: readQuestions(cfg), responses: readResponses(cfg).length }
+  },
+
+  saveQuestions: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    if (cfg.source !== 'form') throw vtError(400, 'NOT_FORM', 'กิจกรรมนี้ไม่ใช่แบบสอบถาม')
+    if (readResponses(cfg).length) throw vtError(409, 'HAS_RESPONSES', 'มีคนตอบแล้ว แก้คำถามไม่ได้ ให้สร้างกิจกรรมใหม่แทน')
+    const qs = cleanQuestions(body.questions)
+    writeQuestions(cfg, qs)
+    return { questions: qs }
+  },
+
+  uploadImage: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    const file = saveUpload(cfg, body.image)
+    return { imageId: file.getId(), width: Number(body.width) || null, height: Number(body.height) || null }
+  },
+
+  formResults: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    const qs = readQuestions(cfg)
+    return Object.assign(
+      { campaign: publicCampaign(cfg), eligible: Object.keys(getUsers()).length, updatedAt: new Date().toISOString() },
+      aggregate(qs, readResponses(cfg), true),
+    )
+  },
+
   employees: (body) => {
     requireAdmin(body)
     const users = getUsers()
@@ -313,9 +394,14 @@ const ACTIONS = {
 
 /* ───────────── auth ───────────── */
 
-function sessionFor(u) {
+// รูปโปรไฟล์ LINE (จาก ID token ที่ LINE ยืนยันแล้ว) เก็บไว้ใน session เพื่อใช้เป็นรูปในแอป
+function sessionFor(u, pic) {
   const exp = Date.now() + SESSION_HOURS * 3600 * 1000
-  return { token: signSession({ uid: u.uid, exp: exp }), user: profile(u), votedEntryId: votedEntryOf(getConfig(), u.uid) }
+  const picture = /^https:\/\/[\w.-]*line-scdn\.net\//.test(String(pic || '')) ? String(pic) : ''
+  return {
+    token: signSession({ uid: u.uid, exp: exp, pic: picture }),
+    user: profile(u, picture),
+  }
 }
 
 function verifyLineIdToken(idToken) {
@@ -457,9 +543,10 @@ function normName(v) {
   return cleanSpaces(v).normalize('NFC')
 }
 
-function profile(u) {
+function profile(u, picture) {
   return {
     id: u.uid,
+    picture: picture || '',
     empId: u.empId,
     name: u.name,
     nick: u.nick,
@@ -495,7 +582,11 @@ function dataBook() {
     props.setProperty('DATA_SHEET_ID', ss.getId())
   }
   Object.keys(DATA_TABS).forEach((name) => {
-    if (ss.getSheetByName(name)) return
+    const existing = ss.getSheetByName(name)
+    if (existing && existing.getLastColumn() < DATA_TABS[name].length) {
+      existing.getRange(1, 1, 1, DATA_TABS[name].length).setNumberFormat('@').setValues([DATA_TABS[name]]).setFontWeight('bold')
+    }
+    if (existing) return
     const sh = ss.insertSheet(name)
     sh.getRange(1, 1, 1, DATA_TABS[name].length).setNumberFormat('@').setValues([DATA_TABS[name]]).setFontWeight('bold')
     sh.setFrozenRows(1)
@@ -543,7 +634,7 @@ function newId(prefix) {
 
 function listCampaigns() {
   const cache = CacheService.getScriptCache()
-  const hit = cache.get('campaigns')
+  const hit = cache.get('campaigns2')
   if (hit) return JSON.parse(hit)
 
   let rows = readDataTab('CAMPAIGNS')
@@ -551,11 +642,11 @@ function listCampaigns() {
     // ครั้งแรก: ย้ายกิจกรรมเดิม (ตั้งค่าแบบชีท) เข้ามาเป็นกิจกรรมแรก
     const raw = PropertiesService.getScriptProperties().getProperty('CONFIG')
     const old = raw ? JSON.parse(raw) : DEFAULT_EVENT
-    const first = Object.assign({}, old, { id: newId('c'), source: 'sheet', createdAt: nowText(), createdBy: 'ระบบ' })
+    const first = Object.assign({}, old, { id: newId('c'), source: 'sheet', createdAt: nowText(), createdBy: 'ระบบ', published: true })
     writeCampaign(first)
-    PropertiesService.getScriptProperties().setProperty('ACTIVE_CAMPAIGN', first.id)
     rows = readDataTab('CAMPAIGNS')
   }
+  const legacyActive = PropertiesService.getScriptProperties().getProperty('ACTIVE_CAMPAIGN')
   const list = rows
     .filter((r) => r[0])
     .map((r) => ({
@@ -568,20 +659,22 @@ function listCampaigns() {
       sheetUrl: r[6],
       createdAt: r[7],
       createdBy: r[8],
+      // แถวก่อน v3.0 ไม่มีคอลัมน์นี้: ใช้กิจกรรมที่เคยเปิดใช้อยู่
+      published: r[9] ? r[9] === 'yes' : r[0] === legacyActive,
     }))
     .reverse()
-  cache.put('campaigns', JSON.stringify(list), 120)
+  cache.put('campaigns2', JSON.stringify(list), 120)
   return list
 }
 
 function writeCampaign(c) {
-  const row = [c.id, c.title, c.subtitle, c.endsAt, c.showCounts ? 'yes' : 'no', c.source, c.sheetUrl || '', c.createdAt, c.createdBy]
+  const row = [c.id, c.title, c.subtitle, c.endsAt, c.showCounts ? 'yes' : 'no', c.source, c.sheetUrl || '', c.createdAt, c.createdBy, c.published ? 'yes' : 'no']
   const sh = dataBook().getSheetByName('CAMPAIGNS')
   const ids = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues().map((r) => r[0]) : []
   const at = ids.indexOf(c.id)
   if (at === -1) appendDataRow('CAMPAIGNS', row)
   else sh.getRange(at + 2, 1, 1, row.length).setNumberFormat('@').setValues([row.map(String)])
-  CacheService.getScriptCache().remove('campaigns')
+  CacheService.getScriptCache().remove('campaigns2')
 }
 
 function campaignById(id) {
@@ -590,11 +683,15 @@ function campaignById(id) {
   return c
 }
 
-// กิจกรรมที่เปิดใช้อยู่ตอนนี้
-function getConfig() {
-  const list = listCampaigns()
-  const active = PropertiesService.getScriptProperties().getProperty('ACTIVE_CAMPAIGN')
-  return list.find((c) => c.id === active) || list[0]
+// ผู้โหวตเข้าได้เฉพาะกิจกรรมที่แสดงอยู่ (แอดมินเข้าได้ทุกกิจกรรมเพื่อดูตัวอย่าง)
+function voterCampaign(body, u) {
+  const c = listCampaigns().find((x) => x.id === String(body.campaignId || ''))
+  if (!c || (!c.published && !(u && isAdmin(u)))) throw vtError(404, 'CAMPAIGN_NOT_FOUND', 'ไม่พบกิจกรรมนี้ หรือปิดการแสดงแล้ว')
+  return c
+}
+
+function hasParticipated(cfg, uid) {
+  return cfg.source === 'form' ? readResponses(cfg).some((r) => r.uid === uid) : readVotes(cfg).some((v) => v.uid === uid)
 }
 
 function publicCampaign(cfg) {
@@ -605,6 +702,7 @@ function publicCampaign(cfg) {
     endsAt: cfg.endsAt || null,
     showCounts: Boolean(cfg.showCounts),
     source: cfg.source,
+    published: Boolean(cfg.published),
     closed: isClosed(cfg),
   }
 }
@@ -621,6 +719,7 @@ function clearEntriesCache(cfg) {
 }
 
 function readEntries(cfg) {
+  if (cfg.source === 'form') return []
   const cache = CacheService.getScriptCache()
   const key = entriesCacheKey(cfg)
   const hit = cache.get(key)
@@ -722,6 +821,7 @@ function eventVotesSheet(cfg) {
 }
 
 function readVotes(cfg) {
+  if (cfg.source === 'form') return []
   const toVote = (r) => ({ time: r[0], uid: r[1], empId: r[2], name: r[3], entryId: r[4], title: r[5] })
   if (cfg.source === 'app') {
     return readDataTab('VOTES')
@@ -744,21 +844,181 @@ function appendVote(cfg, row) {
   SpreadsheetApp.flush()
 }
 
-function votedEntryOf(cfg, uid) {
-  const v = readVotes(cfg).find((x) => x.uid === uid)
-  return v ? v.entryId : null
-}
-
 function countVotes(votes) {
   return votes.reduce((m, v) => ((m[v.entryId] = (m[v.entryId] || 0) + 1), m), {})
+}
+
+/* ───────────── แบบสอบถาม: คำถาม · คำตอบ · สรุปผล ───────────── */
+
+const shortId = (prefix) => prefix + Utilities.getUuid().replace(/-/g, '').slice(0, 10)
+const safeFileId = (v) => (/^[-\w]{20,}$/.test(String(v || '')) ? String(v) : '')
+
+function saveUpload(cfg, dataUrl) {
+  const m = String(dataUrl || '').match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/)
+  if (!m) throw vtError(400, 'BAD_IMAGE', 'ไฟล์รูปไม่ถูกต้อง รองรับ JPG, PNG, WEBP')
+  const bytes = Utilities.base64Decode(m[2])
+  if (bytes.length > MAX_UPLOAD_BYTES) throw vtError(413, 'TOO_LARGE', 'รูปใหญ่เกิน 4MB')
+  return uploadFolder().createFile(Utilities.newBlob(bytes, m[1], cfg.id + '-' + Date.now() + '.jpg'))
+}
+
+function cleanQuestions(list) {
+  if (!Array.isArray(list) || !list.length) throw vtError(400, 'NO_QUESTIONS', 'เพิ่มคำถามอย่างน้อย 1 ข้อ')
+  if (list.length > 50) throw vtError(400, 'TOO_MANY', 'คำถามได้ไม่เกิน 50 ข้อ')
+  return list.map((q, i) => {
+    const type = QUESTION_TYPES.indexOf(q.type) !== -1 ? q.type : 'single'
+    const title = cleanSpaces(q.title).slice(0, 300)
+    if (!title) throw vtError(400, 'BAD_QUESTION', 'คำถามข้อ ' + (i + 1) + ' ยังไม่มีหัวข้อ')
+    const out = {
+      id: /^q\w{6,}$/.test(String(q.id)) ? String(q.id) : shortId('q'),
+      type: type,
+      title: title,
+      description: String(q.description || '').trim().slice(0, 500),
+      required: q.required !== false,
+      imageId: safeFileId(q.imageId),
+      options: [],
+      max: 0,
+    }
+    if (type === 'single' || type === 'multi') {
+      out.options = (q.options || [])
+        .map((o) => ({ id: /^o\w{6,}$/.test(String(o.id)) ? String(o.id) : shortId('o'), label: cleanSpaces(o.label).slice(0, 200), imageId: safeFileId(o.imageId) }))
+        .filter((o) => o.label || o.imageId)
+      if (out.options.length < 2) throw vtError(400, 'FEW_OPTIONS', 'คำถามข้อ ' + (i + 1) + ' ต้องมีตัวเลือกอย่างน้อย 2 ข้อ')
+      if (type === 'multi') out.max = Math.max(0, Math.min(out.options.length, Number(q.max) || 0))
+    }
+    return out
+  })
+}
+
+function writeQuestions(cfg, qs) {
+  const sh = dataBook().getSheetByName('QUESTIONS')
+  const rows = sh.getDataRange().getDisplayValues()
+  for (let i = rows.length - 1; i >= 1; i--) if (rows[i][0] === cfg.id) sh.deleteRow(i + 1)
+  if (qs.length) {
+    const data = qs.map((q, i) => [cfg.id, q.id, String(i + 1), q.type, q.title, JSON.stringify(q)])
+    sh.getRange(sh.getLastRow() + 1, 1, data.length, data[0].length).setNumberFormat('@').setValues(data)
+  }
+  SpreadsheetApp.flush()
+  CacheService.getScriptCache().remove('q:' + cfg.id)
+}
+
+function readQuestions(cfg) {
+  const cache = CacheService.getScriptCache()
+  const hit = cache.get('q:' + cfg.id)
+  if (hit) return JSON.parse(hit)
+  const qs = readDataTab('QUESTIONS')
+    .filter((r) => r[0] === cfg.id)
+    .sort((a, b) => Number(a[2]) - Number(b[2]))
+    .map((r) => JSON.parse(r[5]))
+  try {
+    cache.put('q:' + cfg.id, JSON.stringify(qs), 300)
+  } catch (_) {
+    /* very large form: read each time */
+  }
+  return qs
+}
+
+function formImageIds(cfg) {
+  const ids = []
+  readQuestions(cfg).forEach((q) => {
+    if (q.imageId) ids.push(q.imageId)
+    ;(q.options || []).forEach((o) => o.imageId && ids.push(o.imageId))
+  })
+  return ids
+}
+
+function readResponses(cfg) {
+  if (cfg.source !== 'form') return []
+  return readDataTab('RESPONSES')
+    .filter((r) => r[0] === cfg.id && r[2])
+    .map((r) => {
+      let answers = {}
+      try {
+        answers = JSON.parse(r[5] || '{}')
+      } catch (_) {
+        answers = {}
+      }
+      return { time: r[1], uid: r[2], empId: r[3], name: r[4], answers: answers }
+    })
+}
+
+function cleanAnswers(qs, answers) {
+  const out = {}
+  qs.forEach((q, i) => {
+    const a = answers[q.id]
+    const need = () => {
+      if (q.required) throw vtError(400, 'MISSING_ANSWER', 'กรุณาตอบข้อ ' + (i + 1) + ': ' + q.title, { questionId: q.id })
+    }
+    if (q.type === 'single') {
+      if (q.options.some((o) => o.id === a)) out[q.id] = a
+      else need()
+    } else if (q.type === 'multi') {
+      const picked = (Array.isArray(a) ? a : []).filter((id, k, arr) => arr.indexOf(id) === k && q.options.some((o) => o.id === id))
+      if (q.max && picked.length > q.max) throw vtError(400, 'TOO_MANY_PICKS', 'ข้อ ' + (i + 1) + ' เลือกได้ไม่เกิน ' + q.max + ' ข้อ', { questionId: q.id })
+      if (picked.length) out[q.id] = picked
+      else need()
+    } else if (q.type === 'text') {
+      const t = String(a || '').trim().slice(0, 1000)
+      if (t) out[q.id] = t
+      else need()
+    } else if (q.type === 'rating') {
+      const n = Number(a)
+      if (n >= 1 && n <= 5 && n % 1 === 0) out[q.id] = n
+      else need()
+    }
+  })
+  return out
+}
+
+function readableAnswers(qs, answers) {
+  return qs
+    .map((q, i) => {
+      const a = answers[q.id]
+      if (a === undefined) return ''
+      const label = (id) => (q.options.find((o) => o.id === id) || {}).label || '(รูป)'
+      const text = q.type === 'single' ? label(a) : q.type === 'multi' ? a.map(label).join(', ') : String(a)
+      return (i + 1) + '. ' + text
+    })
+    .filter(Boolean)
+    .join(' | ')
+}
+
+// สรุปผลรายข้อ (ข้อความตอบอิสระส่งเฉพาะให้แอดมิน และไม่แนบชื่อผู้ตอบ)
+function aggregate(qs, responses, withText) {
+  return {
+    total: responses.length,
+    questions: qs.map((q) => {
+      const r = { id: q.id, type: q.type, title: q.title, answered: 0 }
+      const values = responses.map((x) => x.answers[q.id]).filter((v) => v !== undefined && v !== null && v !== '')
+      r.answered = values.length
+      if (q.type === 'single' || q.type === 'multi') {
+        const counts = {}
+        values.forEach((v) => (Array.isArray(v) ? v : [v]).forEach((id) => (counts[id] = (counts[id] || 0) + 1)))
+        r.options = q.options.map((o) => ({ id: o.id, label: o.label, imageId: o.imageId, count: counts[o.id] || 0 }))
+      } else if (q.type === 'rating') {
+        const dist = [0, 0, 0, 0, 0]
+        values.forEach((v) => dist[Number(v) - 1]++)
+        r.distribution = dist
+        r.average = values.length ? Math.round((values.reduce((a, b) => a + Number(b), 0) / values.length) * 10) / 10 : 0
+      } else if (withText) {
+        r.texts = values.slice(-200).reverse()
+      }
+      return r
+    }),
+  }
 }
 
 /* ───────────── Drive images (served only through this script) ───────────── */
 
 function allowedImageIds(u, campaignId) {
   const ids = {}
-  readEntries(getConfig()).forEach((e) => (ids[e.imageId] = 1))
-  if (campaignId && isAdmin(u)) readEntries(campaignById(campaignId)).forEach((e) => (ids[e.imageId] = 1))
+  const add = (cfg) => {
+    readEntries(cfg).forEach((e) => (ids[e.imageId] = 1))
+    if (cfg.source === 'form') formImageIds(cfg).forEach((id) => (ids[id] = 1))
+  }
+  listCampaigns()
+    .filter((c) => c.published)
+    .forEach(add)
+  if (campaignId && isAdmin(u)) add(campaignById(campaignId))
   if (u.photoId) ids[u.photoId] = 1
   return ids
 }

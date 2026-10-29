@@ -1,4 +1,4 @@
-# VOTE TOGETHER · v3.2
+# VOTE TOGETHER · v4.0
 
 **Your Vote. Our Moment.** — ทุกเสียงมีความหมาย ทุกการเลือกสร้างช่วงเวลาร่วมกัน
 
@@ -20,7 +20,10 @@
 ```
 
 - ชื่อคนแสดงเป็น `ชื่อจริง (ชื่อเล่น)` เสมอ · รูปผู้ใช้มาจากคอลัมน์ N "รูปที่ส่ง (Drive)" ของ LINE_USERS
-- **สร้าง/เปลี่ยนกิจกรรม:** แดชบอร์ด → แท็บ "กิจกรรม" → "+ สร้างกิจกรรมใหม่" เลือกได้ว่าจะอัปโหลดรูปในแอปเลย หรือวางลิงก์ชีทคำตอบ Google Form แล้วกด "เปิดใช้กิจกรรมนี้" หน้าแรกเปลี่ยนทันที กิจกรรมเก่ายังดูผลย้อนหลังได้ในแท็บ "ผลโหวต"
+- **หน้าแรก = รายการกิจกรรมที่เปิดอยู่** กดเข้าไปโหวตหรือตอบในแต่ละกิจกรรม (ลิงก์ตรง `/c/<รหัสกิจกรรม>`) แสดงพร้อมกันได้หลายกิจกรรม
+- **ประเภทกิจกรรม:** แบบสอบถาม/โพล (สร้างคำถามเองแบบ Google Form: ตัวเลือกเดียว · หลายตัวเลือก · ข้อความ · ให้คะแนน 1–5 ใส่รูปได้ทั้งคำถามและตัวเลือก) · โหวตภาพอัปโหลดในแอป · โหวตภาพจาก Google Sheet
+- **จัดการ:** แดชบอร์ด → "กิจกรรม" → "+ สร้างกิจกรรมใหม่" → กด "แสดงในหน้าโหวต" เมื่อพร้อม (กิจกรรมใหม่ซ่อนไว้ก่อน) · ผลรายข้อดูได้ในแท็บ "ผลโหวต"
+- รูปผู้ใช้ในแอป = รูปโปรไฟล์ LINE ที่ได้ตอน login (ถ้าโหลดไม่ได้ใช้รูปในคอลัมน์ N ของ LINE_USERS)
 - **ผู้ดูแล:** แดชบอร์ด → แท็บ "ผู้ดูแล" เพิ่ม/นำออกด้วยรหัสพนักงาน (ตั้งต้น `SEED_ADMIN_EMP_IDS` ใน `gas/Code.gs`)
 
 ## ตั้งค่า (ทำครั้งเดียว)
@@ -52,15 +55,18 @@ npm run dev
 
 | action | ต้อง login | คืนค่า |
 |---|---|---|
-| `campaign` | – | `{ campaign: { id, title, subtitle, endsAt, showCounts, source, closed } }` (กิจกรรมที่เปิดใช้) |
+| `openCampaigns` | – | กิจกรรมที่แสดงอยู่ + `done` ถ้า login แล้ว |
+| `campaign` | – | `{ campaignId }` → `{ campaign }` |
 | `login` | – | `{ idToken }` → `{ token, user, votedEntryId }` |
 | `me` | ✓ | `{ user, votedEntryId }` |
-| `entries` | ✓ | `{ entries: [{ id, title, author, imageId, width, height, votes? }] }` |
+| `entries` | ✓ | `{ campaignId }` → `{ entries, votedEntryId }` |
 | `images` | ✓ | `{ ids, size: s\|l\|a }` → `{ images: { id: dataUrl } }` (เฉพาะรูปของกิจกรรมและรูปตัวเอง) |
-| `vote` | ✓ | `{ entryId }` → `{ entryId, votes? }` · 409 `ALREADY_VOTED` |
+| `vote` | ✓ | `{ campaignId, entryId }` → `{ entryId, votes? }` · 409 `ALREADY_VOTED` |
+| `form` / `submitResponse` | ✓ | คำถาม + คำตอบของฉัน / ส่งคำตอบ (409 `ALREADY_ANSWERED`) |
 | `stats` | แอดมิน | `{ campaignId? }` → `{ campaign, totalVotes, voters, eligible, entries }` |
 | `campaigns` / `campaignEntries` | แอดมิน | รายการกิจกรรม / ผลงานของกิจกรรม |
-| `saveCampaign` / `activateCampaign` | แอดมิน | สร้าง-แก้ไข / เปิดใช้กิจกรรม |
+| `saveCampaign` / `setPublished` | แอดมิน | สร้าง-แก้ไข / แสดง-ซ่อนในหน้าโหวต |
+| `campaignQuestions` / `saveQuestions` / `uploadImage` / `formResults` | แอดมิน | ตัวสร้างแบบสอบถามและผลรายข้อ |
 | `addEntry` / `deleteEntry` | แอดมิน | อัปโหลดรูป (dataURL ≤ 4MB) / ลบผลงานที่ยังไม่มีคนโหวต |
 | `employees` · `admins` / `saveAdmins` | แอดมิน | รายชื่อพนักงาน · จัดการผู้ดูแล |
 | `health` | – | ตัวเลขสรุป ไม่มีข้อมูลส่วนตัว |

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import Button from '../../components/Button.jsx'
 import DriveImg from '../../components/DriveImg.jsx'
+import ResultBars from '../../components/ResultBars.jsx'
 import { api } from '../../lib/api.js'
 import { setImageScope } from '../../lib/images.js'
 import { easeOut, rise, stagger } from '../../lib/motion.js'
@@ -10,26 +11,27 @@ const REFRESH_MS = 20000
 const fmt = (n) => n.toLocaleString('th-TH')
 
 export default function Results({ campaigns }) {
-  const active = campaigns?.find((c) => c.active)
+  const active = campaigns?.find((c) => c.published) || campaigns?.[0]
   const [campaignId, setCampaignId] = useState(null)
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const selected = campaignId || active?.id
+  const isForm = campaigns?.find((c) => c.id === selected)?.source === 'form'
 
   const load = useCallback(async () => {
     if (!selected) return
     setBusy(true)
     try {
       setImageScope(selected)
-      setStats(await api.stats(selected))
+      setStats(isForm ? await api.formResults(selected) : await api.stats(selected))
       setError('')
     } catch (err) {
       setError(err.message)
     } finally {
       setBusy(false)
     }
-  }, [selected])
+  }, [selected, isForm])
 
   useEffect(() => {
     setStats(null)
@@ -38,9 +40,10 @@ export default function Results({ campaigns }) {
     return () => clearInterval(t)
   }, [load])
 
-  const ranked = stats ? [...stats.entries].sort((a, b) => b.votes - a.votes) : []
+  const ranked = stats?.entries ? [...stats.entries].sort((a, b) => b.votes - a.votes) : []
   const max = ranked[0]?.votes || 1
-  const turnout = stats?.eligible ? Math.round((stats.voters / stats.eligible) * 100) : 0
+  const participants = stats ? (isForm ? stats.total : stats.voters) : 0
+  const turnout = stats?.eligible ? Math.round((participants / stats.eligible) * 100) : 0
 
   return (
     <div className="admin-panel">
@@ -56,7 +59,7 @@ export default function Results({ campaigns }) {
               onClick={() => setCampaignId(c.id)}
               title={c.title}
             >
-              {c.active && <span className="dot-live" aria-hidden="true" />}
+              {c.published && <span className="dot-live" aria-hidden="true" />}
               {c.title}
             </button>
           ))}
@@ -80,7 +83,31 @@ export default function Results({ campaigns }) {
         </p>
       )}
 
-      {!stats ? (
+      {stats && isForm && stats.questions ? (
+        <>
+          <motion.div className="stats" variants={stagger(0.08)} initial="hidden" animate="show">
+            <motion.div variants={rise} className="stat">
+              <span>ผู้ตอบทั้งหมด</span>
+              <b>{fmt(stats.total)}</b>
+            </motion.div>
+            <motion.div variants={rise} className="stat">
+              <span>ร้อยละของพนักงาน {fmt(stats.eligible)} คน</span>
+              <b>{turnout}%</b>
+            </motion.div>
+            <motion.div variants={rise} className="stat stat-accent">
+              <span>จำนวนคำถาม</span>
+              <b>{fmt(stats.questions.length)}</b>
+            </motion.div>
+          </motion.div>
+          {stats.questions.length ? (
+            <ResultBars results={stats} />
+          ) : (
+            <div className="empty" style={{ marginTop: 20 }}>
+              <p>กิจกรรมนี้ยังไม่มีคำถาม</p>
+            </div>
+          )}
+        </>
+      ) : !stats || isForm || !stats.entries ? (
         <div className="stats">
           {[0, 1, 2].map((i) => (
             <div key={i} className="stat shimmer" style={{ height: 112 }} />
