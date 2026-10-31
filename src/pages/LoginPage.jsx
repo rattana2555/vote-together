@@ -7,7 +7,50 @@ import Avatar from '../components/Avatar.jsx'
 import { APP, isLoginConfigured } from '../config.js'
 import { navigate } from '../lib/router.js'
 import { page, rise, shake, stagger } from '../lib/motion.js'
+import { api } from '../lib/api.js'
 import { useSession } from '../state/session.jsx'
+
+// Registered with LINE HR but not matched (e.g. changed LINE picture/name): ask an admin to confirm.
+function AccessRequest({ info }) {
+  const [empId, setEmpId] = useState('')
+  const [state, setState] = useState(info.requested ? 'sent' : 'idle')
+  const [error, setError] = useState('')
+
+  const send = async (e) => {
+    e.preventDefault()
+    setState('sending')
+    setError('')
+    try {
+      await api.requestAccess(info.requestToken, empId.trim())
+      setState('sent')
+    } catch (err) {
+      setState('idle')
+      setError(err.message)
+    }
+  }
+
+  if (state === 'sent') {
+    return (
+      <motion.div className="access-sent" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+        <b>ส่งคำขอให้ผู้ดูแลแล้ว</b>
+        <span>เมื่อผู้ดูแลยืนยัน กด “ลองเข้าสู่ระบบอีกครั้ง” ได้เลย (ยืนยันครั้งเดียว ใช้ได้ตลอด)</span>
+      </motion.div>
+    )
+  }
+  return (
+    <form className="access-form" onSubmit={send}>
+      <b>ลงทะเบียน LINE HR แล้ว แต่ยังเข้าไม่ได้?</b>
+      <span>ใส่รหัสพนักงาน แล้วผู้ดูแลจะยืนยันว่าบัญชี LINE “{info.lineName}” เป็นของคุณ</span>
+      <div className="access-row">
+        <input value={empId} onChange={(e) => setEmpId(e.target.value)} placeholder="รหัสพนักงาน" inputMode="numeric" required />
+        <Button type="submit" size="sm" disabled={state === 'sending' || !empId.trim()}>
+          {state === 'sending' ? <span className="spinner" aria-hidden="true" /> : null} ส่งคำขอ
+        </Button>
+      </div>
+      {error && <p className="form-error">{error}</p>}
+    </form>
+  )
+}
 
 export default function LoginPage() {
   const { user, login, loginError, notRegistered } = useSession()
@@ -65,10 +108,11 @@ export default function LoginPage() {
                 <path d="M19 3v4M17 5h4" />
               </svg>
             </span>
-            <h2>ต้องลงทะเบียนกับ LINE HR ก่อน</h2>
+            <h2>ยังเข้าสู่ระบบไม่ได้</h2>
             <p>{loginError}</p>
+            {notRegistered.requestToken && <AccessRequest info={notRegistered} />}
             <ol className="register-steps">
-              <li>กดปุ่มด้านล่างเพื่อเปิดแชท LINE HR</li>
+              <li>ถ้ายังไม่เคยลงทะเบียน: กดปุ่มด้านล่างเพื่อเปิดแชท LINE HR</li>
               <li>ลงทะเบียนพนักงานตามขั้นตอนของ LINE HR</li>
               <li>กลับมาที่หน้านี้ แล้วกด “ลองเข้าสู่ระบบอีกครั้ง”</li>
             </ol>

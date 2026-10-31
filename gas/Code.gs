@@ -13,7 +13,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v3.5'
+const VER = 'v3.6'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -37,6 +37,7 @@ const DATA_TABS = {
   CAMPAIGNS: ['รหัสกิจกรรม', 'ชื่อกิจกรรม', 'คำโปรย', 'ปิดโหวต', 'โชว์คะแนน', 'แหล่งผลงาน', 'ลิงก์ชีท', 'สร้างเมื่อ', 'สร้างโดย', 'แสดงในหน้าโหวต', 'ลบแล้ว'],
   ENTRIES: ['รหัสกิจกรรม', 'รหัสผลงาน', 'ชื่อผลงาน', 'เจ้าของผลงาน', 'รหัสรูป', 'กว้าง', 'สูง', 'เพิ่มเมื่อ', 'เพิ่มโดย'],
   VOTES: ['รหัสกิจกรรม'].concat(VOTES_HEADER),
+  ACCESS: ['LINE sub (แอปโหวต)', 'ชื่อ LINE', 'รูป LINE', 'รหัสพนักงานที่แจ้ง', 'สถานะ', 'ขอเมื่อ', 'จัดการโดย', 'จัดการเมื่อ'],
   QUESTIONS: ['รหัสกิจกรรม', 'รหัสคำถาม', 'ลำดับ', 'ประเภท', 'คำถาม', 'ข้อมูล (JSON)'],
   RESPONSES: ['รหัสกิจกรรม', 'เวลา', 'LINE userId', 'รหัสพนักงาน', 'ชื่อผู้ตอบ', 'คำตอบ (JSON)', 'คำตอบ (อ่านง่าย)'],
 }
@@ -120,12 +121,30 @@ const ACTIONS = {
     }
     if (u) return sessionFor(u, line.picture)
     console.warn('login not matched sub=%s name=%s', line.sub, line.name)
+    const req = recordAccessRequest(line)
     throw vtError(
       403,
       'NOT_REGISTERED',
-      'บัญชี LINE “' + line.name + '” ยังไม่ได้ลงทะเบียนพนักงาน กรุณาลงทะเบียนผ่านระบบของ LINE HR ก่อน แล้วกลับมาเข้าสู่ระบบอีกครั้ง',
-      { lineHrUrl: lineHrLink() },
+      'บัญชี LINE “' + line.name + '” ยังไม่ได้ลงทะเบียนพนักงาน หรือระบบจับคู่กับรายชื่อไม่ได้ (เช่นเปลี่ยนรูปหรือชื่อ LINE หลังลงทะเบียน)',
+      {
+        lineHrUrl: lineHrLink(),
+        requestToken: signSession({ req: line.sub, exp: Date.now() + 2 * 24 * 3600 * 1000 }),
+        requested: Boolean(req.empId),
+        lineName: line.name,
+      },
     )
+  },
+
+  // คนที่ลงทะเบียน LINE HR แล้วแต่ระบบจับคู่ไม่ได้: แจ้งรหัสพนักงานให้แอดมินยืนยัน
+  requestAccess: (body) => {
+    const t = readSession(body.requestToken)
+    if (!t || !t.req) throw vtError(401, 'REQUEST_EXPIRED', 'คำขอหมดอายุ กรุณากดเข้าสู่ระบบด้วย LINE อีกครั้ง')
+    const empId = String(body.empId || '').trim()
+    if (!/^[\w-]{1,20}$/.test(empId)) throw vtError(400, 'BAD_EMP', 'กรุณาใส่รหัสพนักงาน')
+    const row = accessRow(t.req)
+    if (!row) throw vtError(404, 'REQUEST_NOT_FOUND', 'ไม่พบคำขอ กรุณากดเข้าสู่ระบบด้วย LINE อีกครั้ง')
+    row.sheet.getRange(row.index, 4, 1, 3).setNumberFormat('@').setValues([[empId, 'รอยืนยัน', nowText()]])
+    return { requested: true }
   },
 
   me: (body) => {
@@ -422,6 +441,47 @@ const ACTIONS = {
     return { value: v, url: lineHrLink() }
   },
 
+  accessRequests: (body) => {
+    requireAdmin(body)
+    const users = getUsers()
+    const byEmp = {}
+    Object.keys(users).forEach((k) => (byEmp[users[k].empId] = users[k]))
+    return {
+      requests: readDataTab('ACCESS')
+        .filter((r) => r[0] && r[4] !== 'อนุมัติแล้ว' && r[4] !== 'ปฏิเสธ')
+        .map((r) => {
+          const emp = byEmp[r[3]]
+          return {
+            sub: r[0],
+            lineName: r[1],
+            picture: /^https:\/\/[\w.-]*line-scdn\.net\//.test(r[2]) ? r[2] : '',
+            empId: r[3],
+            status: r[4],
+            requestedAt: r[5],
+            employee: emp ? { empId: emp.empId, display: displayName(emp), dept: emp.dept, branch: emp.branch, photoId: emp.photoId, lineName: emp.lineName } : null,
+          }
+        })
+        .reverse(),
+    }
+  },
+
+  resolveAccess: (body) => {
+    const admin = requireAdmin(body)
+    const row = accessRow(String(body.sub || ''))
+    if (!row) throw vtError(404, 'REQUEST_NOT_FOUND', 'ไม่พบคำขอนี้')
+    if (body.approve) {
+      const users = getUsers()
+      const empId = String(body.empId || row.values[3] || '').trim()
+      const uid = Object.keys(users).find((k) => users[k].empId === empId)
+      if (!uid) throw vtError(400, 'UNKNOWN_EMPLOYEE', 'ไม่พบรหัสพนักงาน ' + empId + ' ในรายชื่อที่ลงทะเบียน LINE HR')
+      PropertiesService.getScriptProperties().setProperty('link:' + row.values[0], uid)
+      row.sheet.getRange(row.index, 4, 1, 5).setNumberFormat('@').setValues([[empId, 'อนุมัติแล้ว', row.values[5], displayName(admin), nowText()]])
+    } else {
+      row.sheet.getRange(row.index, 5, 1, 4).setNumberFormat('@').setValues([['ปฏิเสธ', row.values[5], displayName(admin), nowText()]])
+    }
+    return { sub: row.values[0] }
+  },
+
   employees: (body) => {
     requireAdmin(body)
     const users = getUsers()
@@ -475,6 +535,26 @@ function verifyLineIdToken(idToken) {
   }
   const data = JSON.parse(res.getContentText())
   return { sub: String(data.sub), picture: String(data.picture || ''), name: String(data.name || '') }
+}
+
+// บันทึกคนที่ login ไม่ผ่าน (1 แถวต่อบัญชี LINE) ให้แอดมินดู/ยืนยันได้
+function accessRow(sub) {
+  const sh = dataBook().getSheetByName('ACCESS')
+  if (sh.getLastRow() < 2) return null
+  const values = sh.getRange(2, 1, sh.getLastRow() - 1, DATA_TABS.ACCESS.length).getDisplayValues()
+  const i = values.findIndex((r) => r[0] === sub)
+  return i === -1 ? null : { sheet: sh, index: i + 2, values: values[i] }
+}
+
+function recordAccessRequest(line) {
+  const row = accessRow(line.sub)
+  if (row) {
+    const status = row.values[4] === 'ปฏิเสธ' || row.values[4] === 'อนุมัติแล้ว' ? 'ขอใหม่' : row.values[4]
+    row.sheet.getRange(row.index, 2, 1, 4).setNumberFormat('@').setValues([[line.name, line.picture, row.values[3], status]])
+    return { empId: row.values[3] }
+  }
+  appendDataRow('ACCESS', [line.sub, line.name, line.picture, '', 'ยังไม่แจ้งรหัส', nowText(), '', ''])
+  return { empId: '' }
 }
 
 function lineHrLink() {
@@ -1127,6 +1207,10 @@ function allowedImageIds(u, campaignId) {
     .forEach(add)
   if (campaignId && isAdmin(u)) add(campaignById(campaignId))
   if (u.photoId) ids[u.photoId] = 1
+  if (isAdmin(u)) {
+    const users = getUsers()
+    Object.keys(users).forEach((k) => users[k].photoId && (ids[users[k].photoId] = 1))
+  }
   return ids
 }
 

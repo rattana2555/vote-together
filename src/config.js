@@ -3,7 +3,7 @@ export const APP = {
   tagline: 'Your Vote. Our Moment.',
   taglineTh: 'ทุกเสียงมีความหมาย ทุกการเลือกสร้างช่วงเวลาร่วมกัน',
   welcome: 'Your voice makes a difference',
-  version: '4.3',
+  version: '4.4',
   hubUrl: 'https://rattanaphaiboon.github.io/app/rattana-hub.html',
 }
 

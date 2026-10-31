@@ -16,7 +16,13 @@ export function SessionProvider({ children }) {
   const [notRegistered, setNotRegistered] = useState(null)
   const fail = useCallback((err) => {
     setLoginError(err.message || 'เข้าสู่ระบบไม่สำเร็จ')
-    setNotRegistered(err.data?.code === 'NOT_REGISTERED' ? { lineHrUrl: err.data.lineHrUrl || '' } : null)
+    setNotRegistered(
+      err.data?.code === 'NOT_REGISTERED'
+        ? { lineHrUrl: err.data.lineHrUrl || '', requestToken: err.data.requestToken, requested: Boolean(err.data.requested), lineName: err.data.lineName }
+        : null,
+    )
+    // LIFF can hand back an expired ID token; drop the LINE session so the next try gets a fresh one
+    if (err.data?.code === 'LINE_VERIFY_FAILED') lineLogout()
   }, [])
 
   const completeLogin = useCallback(async (idToken) => {
@@ -63,7 +69,7 @@ export function SessionProvider({ children }) {
   }, [completeLogin, fail])
 
   const login = useCallback(
-    async (returnTo = '/', opts) => {
+    async function login(returnTo = '/', opts) {
       setLoginError('')
       setNotRegistered(null)
       try {
@@ -72,6 +78,7 @@ export function SessionProvider({ children }) {
         await completeLogin(idToken)
         navigate(takeReturnTo() || returnTo, { replace: true })
       } catch (err) {
+        if (err.data?.code === 'LINE_VERIFY_FAILED' && !opts?.fresh) return login(returnTo, { fresh: true })
         fail(err)
         throw err
       }

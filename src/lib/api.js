@@ -53,6 +53,7 @@ export const api = {
   openCampaigns: () => call('openCampaigns').then((d) => d.campaigns),
   campaign: (campaignId) => call('campaign', { campaignId }).then((d) => d.campaign),
   login: (idToken) => call('login', { idToken }, { auth: false }),
+  requestAccess: (requestToken, empId) => call('requestAccess', { requestToken, empId }, { auth: false }),
   me: () => call('me'),
   entries: (campaignId) => call('entries', { campaignId }),
   images: (ids, size, campaignId) => call('images', { ids, size, campaignId }).then((d) => d.images || {}),
@@ -75,6 +76,8 @@ export const api = {
   employees: () => call('employees').then((d) => d.employees),
   getLineHrLink: () => call('getLineHrLink'),
   saveLineHrLink: (value) => call('saveLineHrLink', { value }),
+  accessRequests: () => call('accessRequests').then((d) => d.requests),
+  resolveAccess: (sub, approve, empId) => call('resolveAccess', { sub, approve, empId }),
   admins: () => call('admins').then((d) => d.admins),
   saveAdmins: (empIds) => call('saveAdmins', { empIds }).then((d) => d.admins),
 }

@@ -41,6 +41,9 @@ const USERS = {
 }
 let adminIds = ['90001']
 let hrLink = ''
+const accessLinks = new Map() // sub -> uid (approved by admin)
+const accessReqs = new Map() // sub -> { lineName, empId, status, requestedAt }
+const reqTokens = new Map() // token -> sub
 const hrUrl = () => (hrLink ? (hrLink.startsWith('@') ? `https://line.me/R/ti/p/${encodeURIComponent(hrLink)}` : hrLink) : '')
 const display = (u) => `${u.name} (${u.nick})`
 const isAdmin = (u) => adminIds.includes(u.empId)
@@ -235,6 +238,7 @@ a{display:block;text-align:center;padding:13px;border-radius:10px;text-decoratio
 <p>มีเฉพาะตอน <code>npm run dev</code> ของจริงจะเปิด LINE แล้วส่ง ID token ให้ backend ตรวจกับ LINE และแท็บ LINE_USERS</p>
 ${btn('พนักงาน (แอดมิน)', 'mock-U-dev-admin', 'ok')}
 ${btn('พนักงาน (ผู้โหวตทั่วไป)', 'mock-U-dev-voter', 'alt')}
+${btn('ลงทะเบียนแล้วแต่จับคู่ไม่ได้ (เปลี่ยนรูป LINE)', 'mock-U-changed-pic', 'alt')}
 ${btn('LINE ที่ยังไม่ลงทะเบียนพนักงาน', 'mock-U-not-registered', 'no')}
 <a class="no" href="${back({ error: 'access_denied' })}">ยกเลิก</a>
 </div></body></html>`
@@ -251,15 +255,55 @@ const actions = {
   login: (b) => {
     const idToken = String(b.idToken || '')
     if (!idToken.startsWith('mock-')) throw new Fail(401, 'LINE_VERIFY_FAILED', 'ยืนยันตัวตนกับ LINE ไม่สำเร็จ หรือหมดอายุ กรุณาเข้าสู่ระบบใหม่')
-    const u = USERS[idToken.slice(5)]
+    const sub = idToken.slice(5)
+    const u = USERS[sub] || USERS[accessLinks.get(sub)]
     if (!u) {
-      throw new Fail(403, 'NOT_REGISTERED', 'บัญชี LINE “ผู้ทดสอบ” ยังไม่ได้ลงทะเบียนพนักงาน กรุณาลงทะเบียนผ่านระบบของ LINE HR ก่อน แล้วกลับมาเข้าสู่ระบบอีกครั้ง', { lineHrUrl: hrUrl() })
+      const prev = accessReqs.get(sub)
+      accessReqs.set(sub, { lineName: 'ผู้ทดสอบ LINE ใหม่', empId: prev?.empId || '', status: prev?.empId ? 'รอยืนยัน' : 'ยังไม่แจ้งรหัส', requestedAt: now() })
+      const requestToken = randomBytes(12).toString('hex')
+      reqTokens.set(requestToken, sub)
+      throw new Fail(403, 'NOT_REGISTERED', 'บัญชี LINE “ผู้ทดสอบ LINE ใหม่” ยังไม่ได้ลงทะเบียนพนักงาน หรือระบบจับคู่กับรายชื่อไม่ได้ (เช่นเปลี่ยนรูปหรือชื่อ LINE หลังลงทะเบียน)', {
+        lineHrUrl: hrUrl(),
+        requestToken,
+        requested: Boolean(prev?.empId),
+        lineName: 'ผู้ทดสอบ LINE ใหม่',
+      })
     }
     const token = randomBytes(16).toString('hex')
     sessions.set(token, u.uid)
     return { token, user: profile(u) }
   },
   me: (b, u) => ({ user: profile(u) }),
+  requestAccess: (b) => {
+    const sub = reqTokens.get(b.requestToken)
+    if (!sub) throw new Fail(401, 'REQUEST_EXPIRED', 'คำขอหมดอายุ กรุณากดเข้าสู่ระบบด้วย LINE อีกครั้ง')
+    if (!String(b.empId || '').trim()) throw new Fail(400, 'BAD_EMP', 'กรุณาใส่รหัสพนักงาน')
+    Object.assign(accessReqs.get(sub), { empId: String(b.empId).trim(), status: 'รอยืนยัน' })
+    return { requested: true }
+  },
+  accessRequests: (b, u) => {
+    requireAdmin(u)
+    return {
+      requests: [...accessReqs.entries()]
+        .filter(([, r]) => !['อนุมัติแล้ว', 'ปฏิเสธ'].includes(r.status))
+        .map(([sub, r]) => {
+          const emp = Object.values(USERS).find((x) => x.empId === r.empId)
+          return { sub, lineName: r.lineName, picture: svgData('av3'), empId: r.empId, status: r.status, requestedAt: r.requestedAt, employee: emp ? { empId: emp.empId, display: display(emp), dept: emp.dept, branch: emp.branch, photoId: emp.avatarId, lineName: emp.nick } : null }
+        }),
+    }
+  },
+  resolveAccess: (b, u) => {
+    requireAdmin(u)
+    const r = accessReqs.get(b.sub)
+    if (!r) throw new Fail(404, 'REQUEST_NOT_FOUND', 'ไม่พบคำขอนี้')
+    if (b.approve) {
+      const emp = Object.values(USERS).find((x) => x.empId === String(b.empId || r.empId))
+      if (!emp) throw new Fail(400, 'UNKNOWN_EMPLOYEE', `ไม่พบรหัสพนักงาน ${b.empId || r.empId} ในรายชื่อที่ลงทะเบียน LINE HR`)
+      accessLinks.set(b.sub, emp.uid)
+      r.status = 'อนุมัติแล้ว'
+    } else r.status = 'ปฏิเสธ'
+    return { sub: b.sub }
+  },
   entries: (b, u) => {
     const c = voterCampaign(b, u)
     const mine = votesOf(c).find((v) => v.uid === u.uid)
@@ -454,7 +498,7 @@ const actions = {
     return actions.admins(b, u)
   },
 }
-const PUBLIC = new Set(['login'])
+const PUBLIC = new Set(['login', 'requestAccess'])
 const OPTIONAL_USER = new Set(['openCampaigns', 'campaign'])
 
 export default function mockBackend() {

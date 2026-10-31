@@ -4,6 +4,7 @@ import Button from '../components/Button.jsx'
 import Results from './admin/Results.jsx'
 import Campaigns from './admin/Campaigns.jsx'
 import Admins from './admin/Admins.jsx'
+import AccessRequests from './admin/AccessRequests.jsx'
 import { api } from '../lib/api.js'
 import { navigate } from '../lib/router.js'
 import { page, spring } from '../lib/motion.js'
@@ -12,6 +13,7 @@ import { useSession } from '../state/session.jsx'
 const TABS = [
   ['results', 'ผลโหวต'],
   ['campaigns', 'กิจกรรม'],
+  ['requests', 'คำขอเข้าใช้'],
   ['admins', 'ผู้ดูแล'],
 ]
 
@@ -20,6 +22,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState('results')
   const [campaigns, setCampaigns] = useState(null)
   const [error, setError] = useState('')
+  const [requestCount, setRequestCount] = useState(0)
   const isAdmin = user?.role === 'admin'
 
   const reload = useCallback(async () => {
@@ -31,7 +34,9 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => {
-    if (isAdmin) reload()
+    if (!isAdmin) return
+    reload()
+    api.accessRequests().then((r) => setRequestCount(r.length), () => {})
   }, [isAdmin, reload])
 
   if (ready && !isAdmin) {
@@ -63,7 +68,10 @@ export default function AdminPage() {
         {TABS.map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? 'is-on' : ''} onClick={() => setTab(key)}>
             {tab === key && <motion.span layoutId="admin-tab" className="tab-pill" transition={spring} />}
-            <span>{label}</span>
+            <span>
+              {label}
+              {key === 'requests' && requestCount > 0 && <span className="tab-count">{requestCount}</span>}
+            </span>
           </button>
         ))}
       </div>
@@ -83,6 +91,7 @@ export default function AdminPage() {
         >
           {tab === 'results' && <Results campaigns={campaigns} />}
           {tab === 'campaigns' && <Campaigns campaigns={campaigns} reload={reload} />}
+          {tab === 'requests' && <AccessRequests onCount={setRequestCount} />}
           {tab === 'admins' && user && <Admins me={user} />}
         </motion.div>
       </AnimatePresence>
