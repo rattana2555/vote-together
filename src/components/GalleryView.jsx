@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion'
 import EntryCard from './EntryCard.jsx'
 import DetailView from './DetailView.jsx'
@@ -12,6 +12,36 @@ import { RESULT_HINT, useLiveResults } from '../lib/live.js'
 import { spring } from '../lib/motion.js'
 import { api } from '../lib/api.js'
 import { navigate } from '../lib/router.js'
+
+// Masonry with real columns (not CSS `columns`): WebKit, incl. LINE's in-app browser on iPhone,
+// never reports items in the 2nd+ CSS column as visible, so they stayed hidden.
+const COLUMN_QUERIES = [
+  ['(min-width: 1080px)', 4],
+  ['(min-width: 720px)', 3],
+]
+const columnCount = () => COLUMN_QUERIES.find(([q]) => matchMedia(q).matches)?.[1] ?? 2
+
+function useColumnCount() {
+  const [n, setN] = useState(columnCount)
+  useEffect(() => {
+    const update = () => setN(columnCount())
+    const lists = COLUMN_QUERIES.map(([q]) => matchMedia(q))
+    lists.forEach((m) => m.addEventListener('change', update))
+    return () => lists.forEach((m) => m.removeEventListener('change', update))
+  }, [])
+  return n
+}
+
+// Each photo goes to the currently shortest column, using its aspect ratio as height.
+function balanceColumns(items, n) {
+  const cols = Array.from({ length: n }, () => ({ h: 0, items: [] }))
+  items.forEach((e) => {
+    const col = cols.reduce((a, b) => (b.h < a.h ? b : a))
+    col.items.push(e)
+    col.h += (e.width && e.height ? e.height / e.width : 1.25) + 0.3
+  })
+  return cols.map((c) => c.items)
+}
 
 // Photo-contest campaigns: pick one entry, confirm, and the vote counts only once the backend saved it.
 export default function GalleryView({ campaign, user }) {
@@ -30,6 +60,8 @@ export default function GalleryView({ campaign, user }) {
   const liveVotes = live?.visible && live.data?.entries ? Object.fromEntries(live.data.entries.map((e) => [e.id, e.votes])) : null
   const showCounts = Boolean(liveVotes) || Boolean(entries?.some((e) => typeof e.votes === 'number'))
   const shown = liveVotes && entries ? entries.map((e) => ({ ...e, votes: liveVotes[e.id] ?? e.votes })) : entries
+  const colCount = useColumnCount()
+  const columns = useMemo(() => balanceColumns(shown || [], colCount), [shown, colCount])
 
   const load = useCallback(async () => {
     setLoadError('')
@@ -139,17 +171,21 @@ export default function GalleryView({ campaign, user }) {
         <LiveRanking data={live.data} votedEntryId={votedEntryId} />
       ) : (
       <LayoutGroup>
-        <div className="gallery">
-          {shown.map((entry, i) => (
-            <EntryCard
-              key={entry.id}
-              entry={entry}
-              index={i}
-              showCounts={showCounts}
-              isVoted={votedEntryId === entry.id}
-              isSelected={selectedId === entry.id}
-              onOpen={setOpenId}
-            />
+        <div className="gallery" style={{ '--cols': columns.length }}>
+          {columns.map((col, c) => (
+            <div key={c} className="gallery-col">
+              {col.map((entry, i) => (
+                <EntryCard
+                  key={entry.id}
+                  entry={entry}
+                  index={i * columns.length + c}
+                  showCounts={showCounts}
+                  isVoted={votedEntryId === entry.id}
+                  isSelected={selectedId === entry.id}
+                  onOpen={setOpenId}
+                />
+              ))}
+            </div>
           ))}
         </div>
         <AnimatePresence>
