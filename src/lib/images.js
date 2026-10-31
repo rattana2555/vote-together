@@ -87,9 +87,18 @@ export function useDriveImage(id, size = 's', enabled = true) {
     setSrc(cachedImage(id, size))
     if (!enabled) return
     let alive = true
-    loadImage(id, size).then((s) => alive && setSrc(s))
+    let timer = 0
+    // A photo uploaded moments ago may not be ready in Drive yet: try again a few times.
+    const attempt = (n) =>
+      loadImage(id, size).then((s) => {
+        if (!alive) return
+        if (s) return setSrc(s)
+        if (n < 3) timer = setTimeout(() => attempt(n + 1), 8000 * (n + 1))
+      })
+    attempt(0)
     return () => {
       alive = false
+      clearTimeout(timer)
     }
   }, [id, size, enabled])
   return src

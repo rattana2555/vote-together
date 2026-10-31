@@ -13,7 +13,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v3.4'
+const VER = 'v3.5'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -196,6 +196,21 @@ const ACTIONS = {
     const done = hasParticipated(cfg, u.uid)
     const visible = resultsVisible(cfg, u, done)
     return { mode: cfg.resultsMode, visible: visible, done: done, updatedAt: new Date().toISOString(), data: visible ? liveResults(cfg) : null }
+  },
+
+  // ตรวจว่ารูปของกิจกรรมที่แสดงอยู่พร้อมให้ดึงไหม (ไม่มีข้อมูลส่วนตัว: แค่ชนิดไฟล์ ขนาด และมีรูปย่อหรือยัง)
+  imageHealth: () => {
+    const ids = []
+    listCampaigns()
+      .filter((c) => c.published)
+      .forEach((c) => readEntries(c).forEach((e) => ids.push(e.imageId)))
+    const res = UrlFetchApp.fetchAll(ids.map((id) => driveApi('files/' + id + '?supportsAllDrives=true&fields=mimeType,size,thumbnailLink')))
+    return {
+      images: res.map((r, i) => {
+        const d = r.getResponseCode() === 200 ? JSON.parse(r.getContentText()) : {}
+        return { ref: ids[i].slice(-5), status: r.getResponseCode(), mime: d.mimeType || '', kb: Math.round(Number(d.size || 0) / 1024), thumbnail: Boolean(d.thumbnailLink) }
+      }),
+    }
   },
 
   images: (body) => {
@@ -1156,7 +1171,7 @@ function loadImages(ids, size) {
   const out = {}
   const missing = []
   ids.forEach((id) => {
-    const hit = getChunks('img:' + size + ':' + id)
+    const hit = getChunks('img2:' + size + ':' + id)
     if (hit) out[id] = hit
     else missing.push(id)
   })
@@ -1181,16 +1196,24 @@ function loadImages(ids, size) {
     if (d.thumbnailLink) {
       fresh['tl:' + ask[k]] = d.thumbnailLink
       want.push({ id: ask[k], url: d.thumbnailLink.replace(/=s\d+$/, '=' + IMAGE_SIZES[size]) })
-    } else if (Number(d.size) < 1500000) direct.push(ask[k]) // รูปเพิ่งอัปโหลด Drive ยังทำ thumbnail ไม่เสร็จ
+    } else if (Number(d.size) < 15000000) direct.push(ask[k]) // รูปเพิ่งอัปโหลด Drive ยังทำ thumbnail ไม่เสร็จ
   })
   if (Object.keys(fresh).length) cache.putAll(fresh, 3000)
   const blobs = UrlFetchApp.fetchAll(
     want.map((w) => ({ url: w.url, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true })),
   )
   const put = (id, blob, cacheIt) => {
+    // ส่งเป็น JPEG เสมอ: รูปย่อของไฟล์ PNG จากมือถือใหญ่กว่า JPEG หลายเท่า
+    if (!/jpe?g/i.test(blob.getContentType() || '')) {
+      try {
+        blob = blob.getAs(MimeType.JPEG)
+      } catch (_) {
+        /* keep original format */
+      }
+    }
     const dataUrl = 'data:' + (blob.getContentType() || 'image/jpeg') + ';base64,' + Utilities.base64Encode(blob.getBytes())
     out[id] = dataUrl
-    if (cacheIt) putChunks('img:' + size + ':' + id, dataUrl, 21600)
+    if (cacheIt) putChunks('img2:' + size + ':' + id, dataUrl, 21600)
   }
   blobs.forEach((r, k) => {
     if (r.getResponseCode() === 200) put(want[k].id, r.getBlob(), true)
