@@ -40,3 +40,10 @@ export const RESULT_HINT = {
   afterVote: 'โหวตหรือตอบแล้วจะเห็นผลคะแนนสด',
   afterClose: 'ผลคะแนนจะแสดงหลังปิดโหวต',
 }
+
+export const RESULT_MODE_LABEL = {
+  always: 'ทุกคนเห็นตลอด',
+  afterVote: 'เห็นหลังโหวต/ตอบแล้ว',
+  afterClose: 'เห็นหลังปิดโหวต',
+  never: 'ไม่ให้เห็น',
+}

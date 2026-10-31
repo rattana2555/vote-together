@@ -6,6 +6,7 @@ import CampaignEditor from './CampaignEditor.jsx'
 import { api } from '../../lib/api.js'
 import { linkProps } from '../../lib/router.js'
 import { rise, stagger } from '../../lib/motion.js'
+import { RESULT_MODE_LABEL } from '../../lib/live.js'
 
 const fmtDate = (iso) =>
   iso ? new Date(iso).toLocaleString('th-TH', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'ยังไม่กำหนด'
@@ -96,6 +97,7 @@ export default function Campaigns({ campaigns, reload }) {
                   {c.published ? <span className="tag tag-live">แสดงอยู่</span> : <span className="tag">ซ่อนอยู่</span>}
                   {c.closed && <span className="tag">ปิดโหวตแล้ว</span>}
                   <span className="tag tag-soft">{SOURCE_NAME[c.source]}</span>
+                  <span className={`tag${c.resultsMode === 'always' ? ' tag-live' : ''}`}>ผลสด: {RESULT_MODE_LABEL[c.resultsMode || 'never']}</span>
                 </div>
               </div>
               <p className="campaign-meta">

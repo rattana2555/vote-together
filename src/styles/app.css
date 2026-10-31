@@ -2737,6 +2737,36 @@ button.dropzone {
   }
 }
 
+/* ---------- admin notice on campaign pages ---------- */
+.admin-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  background: var(--accent-soft);
+}
+.admin-notice > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.admin-notice b {
+  color: var(--text);
+  font-size: 14px;
+}
+.admin-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* ---------- keyframes ---------- */
 @keyframes bob {
   from {

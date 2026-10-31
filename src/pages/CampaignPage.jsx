@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import Button, { LineIcon } from '../components/Button.jsx'
 import GalleryView from '../components/GalleryView.jsx'
 import FormView from '../components/FormView.jsx'
+import AdminResultsNotice from '../components/AdminResultsNotice.jsx'
 import { GallerySkeleton } from '../components/Skeleton.jsx'
 import { api } from '../lib/api.js'
 import { isLoginConfigured } from '../config.js'
@@ -50,10 +51,13 @@ export default function CampaignPage({ id }) {
         )}
       </div>
     )
-  } else if (campaign.source === 'form') {
-    body = <FormView campaign={campaign} />
   } else {
-    body = <GalleryView campaign={campaign} user={user} />
+    body = (
+      <>
+        {user.role === 'admin' && <AdminResultsNotice campaign={campaign} onChange={setCampaign} />}
+        {campaign.source === 'form' ? <FormView key={campaign.resultsMode} campaign={campaign} /> : <GalleryView key={campaign.resultsMode} campaign={campaign} user={user} />}
+      </>
+    )
   }
 
   return (

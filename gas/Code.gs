@@ -13,7 +13,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v3.6'
+const VER = 'v3.8'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -341,6 +341,14 @@ const ACTIONS = {
     return { campaignId: cfg.id }
   },
 
+  setResultsMode: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    if (RESULT_MODES.indexOf(body.mode) === -1) throw vtError(400, 'BAD_MODE', 'โหมดการแสดงผลไม่ถูกต้อง')
+    writeCampaign(Object.assign({}, cfg, { resultsMode: body.mode, showCounts: body.mode === 'always' }))
+    return { campaign: publicCampaign(campaignById(cfg.id)) }
+  },
+
   setPublished: (body) => {
     requireAdmin(body)
     const cfg = campaignById(body.campaignId)
@@ -557,9 +565,11 @@ function recordAccessRequest(line) {
   return { empId: '' }
 }
 
+// LINE ฝ่ายบุคคล @712dqxgv (ลิงก์เดียวกับแอปลงเวลา/Rattana 360) · แอดมินเปลี่ยนได้ในแดชบอร์ด
+const DEFAULT_HR_LINK = 'https://lin.ee/uIN2DMR'
+
 function lineHrLink() {
-  const v = PropertiesService.getScriptProperties().getProperty('HR_LINK') || ''
-  if (!v) return ''
+  const v = PropertiesService.getScriptProperties().getProperty('HR_LINK') || DEFAULT_HR_LINK
   return v.charAt(0) === '@' ? 'https://line.me/R/ti/p/' + encodeURIComponent(v) : v
 }
 

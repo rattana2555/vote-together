@@ -40,7 +40,7 @@ const USERS = {
   'U-dev-voter': { uid: 'U-dev-voter', empId: '90002', name: 'ทดสอบ พนักงาน', nick: 'โหวต', branch: 'W1', dept: 'ขาย', avatarId: 'av2' },
 }
 let adminIds = ['90001']
-let hrLink = ''
+let hrLink = 'https://lin.ee/uIN2DMR'
 const accessLinks = new Map() // sub -> uid (approved by admin)
 const accessReqs = new Map() // sub -> { lineName, empId, status, requestedAt }
 const reqTokens = new Map() // token -> sub
@@ -66,7 +66,7 @@ const campaigns = [
     title: 'HALLOWEEN 2026 หลอนให้สุด แล้วหยุดที่ความปัง',
     subtitle: 'โหวตภาพชุดฮาโลวีนที่ปังที่สุด เลือกได้ 1 ภาพต่อ 1 บัญชี LINE',
     endsAt: '',
-    resultsMode: 'always',
+    resultsMode: 'never',
     source: 'sheet',
     sheetUrl: 'https://docs.google.com/spreadsheets/d/MOCK-SHEET-ID-0000000000/edit?gid=0',
     createdAt: '2026-10-28 10:00:00',
@@ -439,6 +439,12 @@ const actions = {
     const c = byId(b.campaignId)
     campaigns.splice(campaigns.indexOf(c), 1)
     return { campaignId: c.id }
+  },
+  setResultsMode: (b, u) => {
+    requireAdmin(u)
+    const c = byId(b.campaignId)
+    c.resultsMode = b.mode
+    return { campaign: pub(c) }
   },
   setPublished: (b, u) => {
     requireAdmin(u)

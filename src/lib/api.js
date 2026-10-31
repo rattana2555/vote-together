@@ -67,6 +67,7 @@ export const api = {
   campaignEntries: (campaignId) => call('campaignEntries', { campaignId }),
   saveCampaign: (campaign) => call('saveCampaign', { campaign }),
   setPublished: (campaignId, published) => call('setPublished', { campaignId, published }),
+  setResultsMode: (campaignId, mode) => call('setResultsMode', { campaignId, mode }).then((d) => d.campaign),
   deleteCampaign: (campaignId) => call('deleteCampaign', { campaignId }),
   campaignQuestions: (campaignId) => call('campaignQuestions', { campaignId }),
   saveQuestions: (campaignId, questions) => call('saveQuestions', { campaignId, questions }).then((d) => d.questions),

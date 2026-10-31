@@ -116,15 +116,11 @@ export default function LoginPage() {
               <li>ลงทะเบียนพนักงานตามขั้นตอนของ LINE HR</li>
               <li>กลับมาที่หน้านี้ แล้วกด “ลองเข้าสู่ระบบอีกครั้ง”</li>
             </ol>
-            {notRegistered.lineHrUrl ? (
-              <a className="btn btn-line btn-lg btn-block" href={notRegistered.lineHrUrl} target="_blank" rel="noopener noreferrer">
-                <span className="btn-label">
-                  <LineIcon size={24} /> ไปลงทะเบียนที่ LINE HR
-                </span>
-              </a>
-            ) : (
-              <p className="login-fine">ติดต่อฝ่าย HR เพื่อขอลิงก์ลงทะเบียน LINE HR</p>
-            )}
+            <a className="btn btn-line btn-lg btn-block" href={notRegistered.lineHrUrl || APP.lineHrUrl} target="_blank" rel="noopener noreferrer">
+              <span className="btn-label">
+                <LineIcon size={24} /> ไปลงทะเบียนที่ LINE HR
+              </span>
+            </a>
             <Button variant="ghost" className="btn-block" onClick={start} disabled={busy}>
               {busy ? <span className="spinner" aria-hidden="true" /> : null} ลองเข้าสู่ระบบอีกครั้ง
             </Button>
