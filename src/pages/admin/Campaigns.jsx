@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import Button from '../../components/Button.jsx'
 import ConfirmBox from '../../components/ConfirmBox.jsx'
 import CampaignEditor from './CampaignEditor.jsx'
+import CloseVotingButton from '../../components/CloseVotingButton.jsx'
 import { api } from '../../lib/api.js'
 import { linkProps } from '../../lib/router.js'
 import { rise, stagger } from '../../lib/motion.js'
@@ -114,6 +115,7 @@ export default function Campaigns({ campaigns, reload }) {
                   {busyId === c.id ? <span className="spinner" aria-hidden="true" /> : null}
                   {c.published ? 'ซ่อน' : 'แสดงในหน้าโหวต'}
                 </Button>
+                <CloseVotingButton campaign={c} onChange={() => reload()} />
                 <button type="button" className="link-danger campaign-delete" onClick={() => setDeleting(c)}>
                   ลบ
                 </button>

@@ -13,7 +13,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v3.8'
+const VER = 'v3.9'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -339,6 +339,16 @@ const ACTIONS = {
     const cfg = campaignById(body.campaignId)
     writeCampaign(Object.assign({}, cfg, { published: false, deleted: true }))
     return { campaignId: cfg.id }
+  },
+
+  // ปิดโหวตทันที = ตั้งวันปิดเป็นตอนนี้ · เปิดอีกครั้ง = ล้างวันปิด
+  setClosed: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    const endsAt = body.closed ? new Date(Date.now() - 1000).toISOString() : ''
+    writeCampaign(Object.assign({}, cfg, { endsAt: endsAt }))
+    CacheService.getScriptCache().remove('live:' + cfg.id)
+    return { campaign: publicCampaign(campaignById(cfg.id)) }
   },
 
   setResultsMode: (body) => {

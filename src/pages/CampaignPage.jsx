@@ -4,6 +4,7 @@ import Button, { LineIcon } from '../components/Button.jsx'
 import GalleryView from '../components/GalleryView.jsx'
 import FormView from '../components/FormView.jsx'
 import AdminResultsNotice from '../components/AdminResultsNotice.jsx'
+import CloseVotingButton from '../components/CloseVotingButton.jsx'
 import { GallerySkeleton } from '../components/Skeleton.jsx'
 import { api } from '../lib/api.js'
 import { isLoginConfigured } from '../config.js'
@@ -54,8 +55,18 @@ export default function CampaignPage({ id }) {
   } else {
     body = (
       <>
+        {user.role === 'admin' && (
+          <div className="admin-bar">
+            <span className={`tag ${campaign.closed ? '' : 'tag-live'}`}>{campaign.closed ? 'ปิดรับโหวตแล้ว' : 'กำลังเปิดรับโหวต'}</span>
+            <CloseVotingButton campaign={campaign} onChange={setCampaign} />
+          </div>
+        )}
         {user.role === 'admin' && <AdminResultsNotice campaign={campaign} onChange={setCampaign} />}
-        {campaign.source === 'form' ? <FormView key={campaign.resultsMode} campaign={campaign} /> : <GalleryView key={campaign.resultsMode} campaign={campaign} user={user} />}
+        {campaign.source === 'form' ? (
+          <FormView key={`${campaign.resultsMode}-${campaign.closed}`} campaign={campaign} />
+        ) : (
+          <GalleryView key={`${campaign.resultsMode}-${campaign.closed}`} campaign={campaign} user={user} />
+        )}
       </>
     )
   }

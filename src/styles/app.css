@@ -2738,6 +2738,17 @@ button.dropzone {
 }
 
 /* ---------- admin notice on campaign pages ---------- */
+.admin-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.btn-ghost.btn-close-vote {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
 .admin-notice {
   display: flex;
   flex-wrap: wrap;

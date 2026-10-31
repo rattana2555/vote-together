@@ -440,6 +440,12 @@ const actions = {
     campaigns.splice(campaigns.indexOf(c), 1)
     return { campaignId: c.id }
   },
+  setClosed: (b, u) => {
+    requireAdmin(u)
+    const c = byId(b.campaignId)
+    c.endsAt = b.closed ? new Date(Date.now() - 1000).toISOString() : ''
+    return { campaign: pub(c) }
+  },
   setResultsMode: (b, u) => {
     requireAdmin(u)
     const c = byId(b.campaignId)
