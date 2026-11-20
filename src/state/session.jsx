@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { api, session } from '../lib/api.js'
 import { clearImageCache } from '../lib/images.js'
+import { clearDataCache } from '../lib/dataCache.js'
 import { lineLogout, resumeLineLogin, startLineLogin, takeReturnTo } from '../lib/lineAuth.js'
 import { navigate } from '../lib/router.js'
 import { store } from '../lib/storage.js'
@@ -90,6 +91,7 @@ export function SessionProvider({ children }) {
     session.token = null
     lineLogout()
     clearImageCache()
+    clearDataCache()
     setUser(null)
     navigate('/')
   }, [])

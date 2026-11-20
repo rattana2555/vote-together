@@ -12,6 +12,7 @@ import SubmitEntry from './SubmitEntry.jsx'
 import { RESULT_HINT, useLiveResults } from '../lib/live.js'
 import { spring } from '../lib/motion.js'
 import { api } from '../lib/api.js'
+import { fetchEntries, readCached, writeCached } from '../lib/dataCache.js'
 import { navigate } from '../lib/router.js'
 
 // Masonry with real columns (not CSS `columns`): WebKit, incl. LINE's in-app browser on iPhone,
@@ -46,8 +47,9 @@ function balanceColumns(items, n) {
 
 // Photo-contest campaigns: pick one entry, confirm, and the vote counts only once the backend saved it.
 export default function GalleryView({ campaign, user }) {
-  const [entries, setEntries] = useState(null)
-  const [votedEntryId, setVotedEntryId] = useState(null)
+  const saved = readCached(`entries:${campaign.id}`)
+  const [entries, setEntries] = useState(() => saved?.entries || null)
+  const [votedEntryId, setVotedEntryId] = useState(() => saved?.votedEntryId ?? null)
   const [loadError, setLoadError] = useState('')
   const [openId, setOpenId] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
@@ -67,17 +69,23 @@ export default function GalleryView({ campaign, user }) {
   const load = useCallback(async () => {
     setLoadError('')
     try {
-      const d = await api.entries(campaign.id)
+      const d = await fetchEntries(campaign.id)
       setEntries(d.entries)
       setVotedEntryId(d.votedEntryId ?? null)
     } catch (err) {
-      setLoadError(err.message)
+      // A saved copy is still useful offline or while the backend is slow; only an empty page shows the error.
+      if (!readCached(`entries:${campaign.id}`)) setLoadError(err.message)
     }
   }, [campaign.id])
 
   useEffect(() => {
     load()
   }, [load])
+
+  // Keep the device copy in step with votes and submissions made here.
+  useEffect(() => {
+    if (entries) writeCached(`entries:${campaign.id}`, { entries, votedEntryId })
+  }, [entries, votedEntryId, campaign.id])
 
   const openEntry = shown?.find((e) => e.id === openId)
   const selectedEntry = entries?.find((e) => e.id === selectedId)

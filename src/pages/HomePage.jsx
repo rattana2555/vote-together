@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import Hero from '../components/Hero.jsx'
 import Button from '../components/Button.jsx'
-import { api } from '../lib/api.js'
+import { fetchCampaigns, prefetchGallery, readCached, rememberCampaign } from '../lib/dataCache.js'
 import { ENV } from '../config.js'
 import { linkProps } from '../lib/router.js'
 import { easeOut, page } from '../lib/motion.js'
@@ -32,18 +32,23 @@ function TypeIcon({ source }) {
 
 export default function HomePage() {
   const { user, ready } = useSession()
-  const [campaigns, setCampaigns] = useState(null)
+  const [campaigns, setCampaigns] = useState(() => readCached('campaigns'))
   const [error, setError] = useState('')
   const listRef = useRef(null)
 
   const load = useCallback(async () => {
     setError('')
     try {
-      setCampaigns(await api.openCampaigns())
+      const list = await fetchCampaigns()
+      setCampaigns(list)
+      list.forEach(rememberCampaign)
+      // Most people open a photo contest next: start its entries and first photos now.
+      if (user) list.filter((c) => c.source !== 'form').slice(0, 3).forEach((c) => prefetchGallery(c.id))
     } catch (err) {
-      setError(err.message)
+      // Keep showing the saved list if there is one; only an empty screen needs the error.
+      setError((prev) => prev || err.message)
     }
-  }, [])
+  }, [user])
 
   useEffect(() => {
     if (ENV.apiBase && ready) load()
@@ -56,7 +61,7 @@ export default function HomePage() {
         <p>ระบบโหวตกำลังจะเปิดเร็ว ๆ นี้</p>
       </div>
     )
-  } else if (error) {
+  } else if (error && !campaigns) {
     body = (
       <div className="empty">
         <p>{error}</p>
@@ -86,6 +91,7 @@ export default function HomePage() {
           <motion.a
             key={c.id}
             {...linkProps(`/c/${c.id}`)}
+            onPointerDown={() => c.source !== 'form' && user && prefetchGallery(c.id)}
             className={`event-card${c.closed ? ' is-closed' : ''}`}
             initial={{ opacity: 0, y: 24, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}

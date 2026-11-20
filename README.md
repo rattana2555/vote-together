@@ -1,4 +1,4 @@
-# VOTE TOGETHER · v4.8
+# VOTE TOGETHER · v4.9
 
 **Your Vote. Our Moment.** — ทุกเสียงมีความหมาย ทุกการเลือกสร้างช่วงเวลาร่วมกัน
 

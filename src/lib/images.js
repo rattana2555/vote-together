@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api.js'
 
-const BATCH = 4
+const BATCH = 6
 const DISK = 'vt-images-v1'
 const cache = new Map()
 const waiting = new Map()

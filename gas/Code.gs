@@ -13,7 +13,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v4.0'
+const VER = 'v4.1'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -274,7 +274,7 @@ const ACTIONS = {
     const u = requireUser(body)
     const size = IMAGE_SIZES[body.size] ? body.size : 's'
     const ids = (body.ids || []).map(String).slice(0, MAX_IMAGES_PER_CALL)
-    const allowed = allowedImageIds(u, body.campaignId)
+    const allowed = allowedImageIdsFast(u, body.campaignId, ids)
     return { images: loadImages(ids.filter((id) => allowed[id]), size) }
   },
 
@@ -972,7 +972,7 @@ function readEntries(cfg) {
   if (hit) return JSON.parse(hit)
   const entries = cfg.source === 'app' ? readAppEntries(cfg) : readSheetEntries(cfg)
   try {
-    cache.put(key, JSON.stringify(entries), 120)
+    cache.put(key, JSON.stringify(entries), 300)
   } catch (_) {
     /* too many entries for one cache value */
   }
@@ -1286,6 +1286,27 @@ function allowedImageIds(u, campaignId) {
   if (isAdmin(u)) {
     const users = getUsers()
     Object.keys(users).forEach((k) => users[k].photoId && (ids[users[k].photoId] = 1))
+  }
+  return ids
+}
+
+// รายการรูปที่ดูได้ จำไว้ 5 นาที (อ่านทุกกิจกรรมทุกครั้งช้า) ถ้ามีรูปที่ไม่อยู่ในรายการ เช่นเพิ่งส่ง ค่อยคำนวณใหม่
+function allowedImageIdsFast(u, campaignId, wanted) {
+  const cache = CacheService.getScriptCache()
+  const key = 'allow1:' + (isAdmin(u) ? 'a' : 'v') + ':' + (campaignId && isAdmin(u) ? campaignId : '')
+  const hit = cache.get(key)
+  if (hit) {
+    const ids = JSON.parse(hit)
+    if (u.photoId) ids[u.photoId] = 1
+    if (wanted.every((id) => ids[id])) return ids
+  }
+  const ids = allowedImageIds(u, campaignId)
+  const shared = Object.assign({}, ids)
+  if (u.photoId && !isAdmin(u)) delete shared[u.photoId]
+  try {
+    cache.put(key, JSON.stringify(shared), 300)
+  } catch (_) {
+    /* list too large to remember */
   }
   return ids
 }

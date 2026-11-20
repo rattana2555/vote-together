@@ -7,6 +7,7 @@ import AdminResultsNotice from '../components/AdminResultsNotice.jsx'
 import CloseVotingButton from '../components/CloseVotingButton.jsx'
 import { GallerySkeleton } from '../components/Skeleton.jsx'
 import { api } from '../lib/api.js'
+import { cachedCampaign, fetchCampaign, fetchEntries, rememberCampaign } from '../lib/dataCache.js'
 import { isLoginConfigured } from '../config.js'
 import { linkProps, navigate } from '../lib/router.js'
 import { page, rise, stagger } from '../lib/motion.js'
@@ -33,14 +34,31 @@ function AllowSubmitToggle({ campaign, onChange }) {
 
 export default function CampaignPage({ id }) {
   const { user, ready, login } = useSession()
-  const [campaign, setCampaign] = useState(null)
+  const [campaign, setCampaignState] = useState(() => cachedCampaign(id))
   const [error, setError] = useState('')
+  const setCampaign = (c) => {
+    rememberCampaign(c)
+    setCampaignState(c)
+  }
 
   useEffect(() => {
     if (!ready) return
-    setCampaign(null)
+    setCampaignState(cachedCampaign(id))
     setError('')
-    api.campaign(id).then(setCampaign, (err) => setError(err.message))
+    let alive = true
+    // Ask for the campaign and its entries together instead of one after the other.
+    const fresh = fetchCampaign(id)
+    if (user) {
+      const known = cachedCampaign(id)
+      if (!known || known.source !== 'form') fetchEntries(id).catch(() => {})
+    }
+    fresh.then(
+      (c) => alive && setCampaignState(c),
+      (err) => alive && setError(err.message),
+    )
+    return () => {
+      alive = false
+    }
   }, [id, ready, user])
 
   let body
