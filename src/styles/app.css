@@ -2778,6 +2778,126 @@ button.dropzone {
   gap: 8px;
 }
 
+/* ---------- employee submissions ---------- */
+.submit-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--surface-strong);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: var(--shadow-1);
+}
+.submit-panel.is-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+}
+.submit-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.submit-cta div,
+.submit-mine div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.submit-cta span,
+.submit-mine span {
+  color: var(--text-2);
+  font-size: 13px;
+}
+.submit-mine {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.submit-mine b {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.submit-thumb {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg-2);
+}
+.submit-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.submit-form {
+  display: grid;
+  gap: 14px;
+}
+@media (min-width: 720px) {
+  .submit-form {
+    grid-template-columns: 220px 1fr;
+    align-items: start;
+  }
+}
+.submit-drop {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  aspect-ratio: 4 / 5;
+  width: 100%;
+  max-width: 260px;
+  justify-self: center;
+  padding: 12px;
+  border-radius: 18px;
+  border: 2px dashed var(--border-strong);
+  background: var(--bg-2);
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+.submit-drop.has-img {
+  padding: 0;
+  border-style: solid;
+}
+.submit-drop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.submit-drop span {
+  font-size: 13px;
+}
+.submit-fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.submit-owner {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+.submit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.badge-mine {
+  background: var(--grad-warm);
+  color: #fff;
+}
+
 /* ---------- keyframes ---------- */
 @keyframes bob {
   from {

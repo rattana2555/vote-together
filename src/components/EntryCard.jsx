@@ -31,6 +31,7 @@ export default function EntryCard({ entry, index, showCounts, isVoted, isSelecte
           transition={softSpring}
         >
           <DriveImg id={entry.imageId} alt={entry.title} onReady={() => setLoaded(true)} />
+          {entry.mine && !isVoted && <span className="badge badge-mine">ผลงานของคุณ</span>}
           {isVoted && (
             <span className="badge badge-voted">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

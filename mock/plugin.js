@@ -105,6 +105,21 @@ const campaigns = [
     ],
   },
 ]
+campaigns.push({
+  id: 'c-y2k',
+  title: 'Best costume award Y2K 2027',
+  subtitle: 'ใครจะได้ครองบัลลังก์ Best Costume ประจำปี',
+  endsAt: '',
+  resultsMode: 'afterClose',
+  source: 'app',
+  sheetUrl: '',
+  createdAt: '2026-11-20 09:00:00',
+  createdBy: 'ทดสอบ แอดมิน (แอด)',
+  published: true,
+  allowSubmit: true,
+  entries: [],
+  questions: [],
+})
 const responses = [] // { campaignId, uid, answers }
 const byId = (id) => {
   const c = campaigns.find((x) => x.id === id)
@@ -126,7 +141,7 @@ const isClosed = (c) => Boolean(c.endsAt) && Date.now() > new Date(c.endsAt).get
 const votesOf = (c) => votes.filter((v) => v.campaignId === c.id)
 const responsesOf = (c) => responses.filter((r) => r.campaignId === c.id)
 const countOf = (c, id) => votesOf(c).filter((v) => v.entryId === id).length
-const pub = (c) => ({ id: c.id, title: c.title, subtitle: c.subtitle, endsAt: c.endsAt || null, showCounts: c.resultsMode === 'always', resultsMode: c.resultsMode, source: c.source, published: c.published, closed: isClosed(c) })
+const pub = (c) => ({ allowSubmit: Boolean(c.allowSubmit), id: c.id, title: c.title, subtitle: c.subtitle, endsAt: c.endsAt || null, showCounts: c.resultsMode === 'always', resultsMode: c.resultsMode, source: c.source, published: c.published, closed: isClosed(c) })
 const visible = (c, u, participated) => isAdmin(u) || c.resultsMode === 'always' || (c.resultsMode === 'afterVote' && participated) || (c.resultsMode === 'afterClose' && isClosed(c))
 const live = (c) =>
   c.source === 'form'
@@ -309,7 +324,7 @@ const actions = {
     const mine = votesOf(c).find((v) => v.uid === u.uid)
     return {
       votedEntryId: mine?.entryId ?? null,
-      entries: c.entries.map((e) => ({ ...e, votes: visible(c, u, Boolean(mine)) ? countOf(c, e.id) : undefined })),
+      entries: c.entries.map(({ by, ...e }) => ({ ...e, mine: Boolean(by) && by === u.uid, votes: visible(c, u, Boolean(mine)) ? countOf(c, e.id) : undefined })),
     }
   },
   results: (b, u) => {
@@ -326,10 +341,34 @@ const actions = {
     if (isClosed(c)) throw new Fail(403, 'CLOSED', 'ปิดรับโหวตแล้ว')
     const entry = c.entries.find((e) => e.id === b.entryId)
     if (!entry) throw new Fail(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้')
+    if (entry.by && entry.by === u.uid) throw new Fail(400, 'OWN_ENTRY', 'โหวตให้ผลงานของตัวเองไม่ได้ ลองเลือกผลงานของเพื่อน ๆ ดูนะ')
     const mine = votesOf(c).find((v) => v.uid === u.uid)
     if (mine) throw new Fail(409, 'ALREADY_VOTED', 'บัญชีนี้โหวตไปแล้ว', { votedEntryId: mine.entryId })
     votes.push({ campaignId: c.id, uid: u.uid, entryId: entry.id })
     return { entryId: entry.id, votes: visible(c, u, true) ? countOf(c, entry.id) : undefined }
+  },
+  submitEntry: async (b, u) => {
+    const c = voterCampaign(b, u)
+    if (c.source !== 'app' || !c.allowSubmit) throw new Fail(403, 'SUBMIT_OFF', 'กิจกรรมนี้ยังไม่เปิดให้ส่งผลงาน')
+    if (isClosed(c)) throw new Fail(403, 'CLOSED', 'ปิดกิจกรรมแล้ว ส่งผลงานไม่ได้')
+    if (!String(b.title || '').trim()) throw new Fail(400, 'BAD_TITLE', 'กรุณาตั้งชื่อผลงาน')
+    if (c.entries.some((e) => e.by === u.uid)) throw new Fail(409, 'ALREADY_SUBMITTED', 'คุณส่งผลงานในกิจกรรมนี้แล้ว (ลบผลงานเดิมก่อนถ้าต้องการส่งใหม่)')
+    if (!/^data:image\/(jpeg|png|webp);base64,/.test(b.image || '')) throw new Fail(400, 'BAD_IMAGE', 'ไฟล์รูปไม่ถูกต้อง รองรับ JPG, PNG, WEBP')
+    await wait(500)
+    const id = rid('up')
+    uploads.set(id, b.image)
+    const entry = { id, title: b.title.trim(), author: display(u), imageId: id, width: b.width || null, height: b.height || null, by: u.uid }
+    c.entries.push(entry)
+    const { by, ...pubEntry } = entry
+    return { entry: { ...pubEntry, mine: true, votes: 0 } }
+  },
+  deleteMyEntry: (b, u) => {
+    const c = voterCampaign(b, u)
+    const e = c.entries.find((x) => x.id === b.entryId)
+    if (!e || e.by !== u.uid) throw new Fail(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานของคุณ')
+    if (votesOf(c).some((v) => v.entryId === e.id)) throw new Fail(409, 'HAS_VOTES', 'ผลงานนี้มีคนโหวตแล้ว ลบไม่ได้')
+    c.entries = c.entries.filter((x) => x.id !== e.id)
+    return { entryId: e.id }
   },
   form: (b, u) => {
     const c = voterCampaign(b, u)
@@ -427,6 +466,7 @@ const actions = {
       createdAt: prev?.createdAt || now(),
       createdBy: prev?.createdBy || display(u),
       published: prev ? prev.published : false,
+      allowSubmit: source === 'app' && Boolean(x.allowSubmit),
       entries: prev && prev.source === source ? prev.entries : source === 'sheet' ? sheetEntries : [],
       questions: prev?.questions || [],
     }
@@ -439,6 +479,12 @@ const actions = {
     const c = byId(b.campaignId)
     campaigns.splice(campaigns.indexOf(c), 1)
     return { campaignId: c.id }
+  },
+  setAllowSubmit: (b, u) => {
+    requireAdmin(u)
+    const c = byId(b.campaignId)
+    c.allowSubmit = Boolean(b.allowSubmit)
+    return { campaign: pub(c) }
   },
   setClosed: (b, u) => {
     requireAdmin(u)

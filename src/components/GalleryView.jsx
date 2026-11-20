@@ -8,6 +8,7 @@ import Button from './Button.jsx'
 import { GallerySkeleton } from './Skeleton.jsx'
 import LiveBadge from './LiveBadge.jsx'
 import LiveRanking from './LiveRanking.jsx'
+import SubmitEntry from './SubmitEntry.jsx'
 import { RESULT_HINT, useLiveResults } from '../lib/live.js'
 import { spring } from '../lib/motion.js'
 import { api } from '../lib/api.js'
@@ -135,11 +136,26 @@ export default function GalleryView({ campaign, user }) {
     )
   }
   if (!entries) return <GallerySkeleton />
+
+  const myEntry = entries.find((e) => e.mine)
+  const canSubmit = campaign.source === 'app' && campaign.allowSubmit && (!campaign.closed || myEntry)
+  const submitPanel = canSubmit && (
+    <SubmitEntry
+      campaign={campaign}
+      user={user}
+      myEntry={myEntry}
+      onSubmitted={({ votes, ...entry }) => setEntries((list) => [...list, entry])}
+      onRemoved={(id) => setEntries((list) => list.filter((e) => e.id !== id))}
+    />
+  )
   if (!entries.length) {
     return (
-      <div className="empty">
-        <p>ยังไม่มีผลงานในกิจกรรมนี้</p>
-      </div>
+      <>
+        {submitPanel}
+        <div className="empty">
+          <p>{canSubmit ? 'ยังไม่มีผลงาน เป็นคนแรกที่ส่งผลงานเลย!' : 'ยังไม่มีผลงานในกิจกรรมนี้'}</p>
+        </div>
+      </>
     )
   }
 
@@ -165,6 +181,7 @@ export default function GalleryView({ campaign, user }) {
         )}
         {live?.visible && <LiveBadge updatedAt={live.updatedAt} />}
       </div>
+      {submitPanel}
       {votedEntryId && <p className="pill pill-success voted-pill">คุณโหวตแล้ว · ขอบคุณที่ร่วมสร้างช่วงเวลานี้</p>}
 
       {tab === 'ranking' && live?.visible ? (

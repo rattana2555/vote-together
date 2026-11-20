@@ -13,6 +13,24 @@ import { page, rise, stagger } from '../lib/motion.js'
 import { useSession } from '../state/session.jsx'
 import { SOURCE_LABEL, fmtDeadline } from './HomePage.jsx'
 
+function AllowSubmitToggle({ campaign, onChange }) {
+  const [busy, setBusy] = useState(false)
+  const toggle = async () => {
+    setBusy(true)
+    try {
+      onChange(await api.setAllowSubmit(campaign.id, !campaign.allowSubmit))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Button size="sm" variant={campaign.allowSubmit ? 'ghost' : 'primary'} onClick={toggle} disabled={busy}>
+      {busy ? <span className="spinner" aria-hidden="true" /> : null}
+      {campaign.allowSubmit ? 'ปิดรับผลงานจากพนักงาน' : 'เปิดให้พนักงานส่งผลงานเอง'}
+    </Button>
+  )
+}
+
 export default function CampaignPage({ id }) {
   const { user, ready, login } = useSession()
   const [campaign, setCampaign] = useState(null)
@@ -59,13 +77,14 @@ export default function CampaignPage({ id }) {
           <div className="admin-bar">
             <span className={`tag ${campaign.closed ? '' : 'tag-live'}`}>{campaign.closed ? 'ปิดรับโหวตแล้ว' : 'กำลังเปิดรับโหวต'}</span>
             <CloseVotingButton campaign={campaign} onChange={setCampaign} />
+            {campaign.source === 'app' && <AllowSubmitToggle campaign={campaign} onChange={setCampaign} />}
           </div>
         )}
         {user.role === 'admin' && <AdminResultsNotice campaign={campaign} onChange={setCampaign} />}
         {campaign.source === 'form' ? (
           <FormView key={`${campaign.resultsMode}-${campaign.closed}`} campaign={campaign} />
         ) : (
-          <GalleryView key={`${campaign.resultsMode}-${campaign.closed}`} campaign={campaign} user={user} />
+          <GalleryView key={`${campaign.resultsMode}-${campaign.closed}-${campaign.allowSubmit}`} campaign={campaign} user={user} />
         )}
       </>
     )

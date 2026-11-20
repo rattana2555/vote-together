@@ -21,6 +21,7 @@ export default function DetailView({ entry, showCounts, votedEntryId, closed, us
 
   let action
   if (isMine) action = <div className="vote-done">คุณโหวตผลงานนี้แล้ว</div>
+  else if (entry.mine) action = <p className="vote-note">นี่คือผลงานของคุณ โหวตให้ตัวเองไม่ได้ ลองดูผลงานของเพื่อน ๆ นะ</p>
   else if (hasVoted) action = <p className="vote-note">คุณใช้สิทธิ์โหวตไปแล้วในกิจกรรมนี้</p>
   else if (closed) action = <p className="vote-note">ปิดรับโหวตแล้ว</p>
   else

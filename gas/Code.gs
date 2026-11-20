@@ -13,7 +13,7 @@
  * ครั้งแรกหลัง push ให้กด Run ฟังก์ชัน setup() 1 ครั้งเพื่ออนุญาตสิทธิ์
  */
 
-const VER = 'v3.9'
+const VER = 'v4.0'
 
 const USERS_SHEET_ID = '1M6HdISsLN684qRWyQ73CA4AmUzmYtZaOlffDJXZZIXQ'
 const USERS_TAB = 'LINE_USERS'
@@ -34,8 +34,8 @@ const VOTES_TAB = 'VOTE_TOGETHER_VOTES'
 const VOTES_HEADER = ['เวลา', 'LINE userId', 'รหัสพนักงาน', 'ชื่อผู้โหวต', 'รหัสผลงาน', 'ชื่อผลงาน']
 
 const DATA_TABS = {
-  CAMPAIGNS: ['รหัสกิจกรรม', 'ชื่อกิจกรรม', 'คำโปรย', 'ปิดโหวต', 'โชว์คะแนน', 'แหล่งผลงาน', 'ลิงก์ชีท', 'สร้างเมื่อ', 'สร้างโดย', 'แสดงในหน้าโหวต', 'ลบแล้ว'],
-  ENTRIES: ['รหัสกิจกรรม', 'รหัสผลงาน', 'ชื่อผลงาน', 'เจ้าของผลงาน', 'รหัสรูป', 'กว้าง', 'สูง', 'เพิ่มเมื่อ', 'เพิ่มโดย'],
+  CAMPAIGNS: ['รหัสกิจกรรม', 'ชื่อกิจกรรม', 'คำโปรย', 'ปิดโหวต', 'โชว์คะแนน', 'แหล่งผลงาน', 'ลิงก์ชีท', 'สร้างเมื่อ', 'สร้างโดย', 'แสดงในหน้าโหวต', 'ลบแล้ว', 'พนักงานส่งผลงานเอง'],
+  ENTRIES: ['รหัสกิจกรรม', 'รหัสผลงาน', 'ชื่อผลงาน', 'เจ้าของผลงาน', 'รหัสรูป', 'กว้าง', 'สูง', 'เพิ่มเมื่อ', 'เพิ่มโดย', 'LINE userId ผู้ส่ง'],
   VOTES: ['รหัสกิจกรรม'].concat(VOTES_HEADER),
   ACCESS: ['LINE sub (แอปโหวต)', 'ชื่อ LINE', 'รูป LINE', 'รหัสพนักงานที่แจ้ง', 'สถานะ', 'ขอเมื่อ', 'จัดการโดย', 'จัดการเมื่อ'],
   QUESTIONS: ['รหัสกิจกรรม', 'รหัสคำถาม', 'ลำดับ', 'ประเภท', 'คำถาม', 'ข้อมูล (JSON)'],
@@ -46,6 +46,7 @@ const QUESTION_TYPES = ['single', 'multi', 'text', 'rating']
 const RESULT_MODES = ['never', 'always', 'afterVote', 'afterClose']
 const LIVE_CACHE_SECONDS = 15
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+const MAX_SUBMISSIONS_PER_PERSON = 1
 const SESSION_HOURS = 72
 const IMAGE_SIZES = { s: 's640', l: 's1600', a: 's200' }
 const MAX_IMAGES_PER_CALL = 8
@@ -203,9 +204,46 @@ const ACTIONS = {
         imageId: e.imageId,
         width: e.width,
         height: e.height,
+        mine: Boolean(e.by) && e.by === u.uid,
         votes: counts ? counts[e.id] || 0 : undefined,
       })),
     }
+  },
+
+  // พนักงานส่งผลงานของตัวเอง (กิจกรรมแบบอัปโหลดในแอปที่แอดมินเปิดให้ส่ง)
+  submitEntry: (body) => {
+    const u = requireUser(body)
+    const cfg = voterCampaign(body, u)
+    if (cfg.source !== 'app' || !cfg.allowSubmit) throw vtError(403, 'SUBMIT_OFF', 'กิจกรรมนี้ยังไม่เปิดให้ส่งผลงาน')
+    if (isClosed(cfg)) throw vtError(403, 'CLOSED', 'ปิดกิจกรรมแล้ว ส่งผลงานไม่ได้')
+    const title = cleanSpaces(body.title).slice(0, 120)
+    if (!title) throw vtError(400, 'BAD_TITLE', 'กรุณาตั้งชื่อผลงาน')
+    const lock = LockService.getScriptLock()
+    if (!lock.tryLock(20000)) throw vtError(503, 'BUSY', 'มีคนส่งผลงานพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง')
+    try {
+      clearEntriesCache(cfg)
+      if (readEntries(cfg).filter((e) => e.by === u.uid).length >= MAX_SUBMISSIONS_PER_PERSON) {
+        throw vtError(409, 'ALREADY_SUBMITTED', 'คุณส่งผลงานในกิจกรรมนี้แล้ว (ลบผลงานเดิมก่อนถ้าต้องการส่งใหม่)')
+      }
+      const file = saveUpload(cfg, body.image)
+      const entry = { id: file.getId(), title: title, author: displayName(u), imageId: file.getId(), width: Number(body.width) || null, height: Number(body.height) || null }
+      appendDataRow('ENTRIES', [cfg.id, entry.id, entry.title, entry.author, entry.imageId, String(entry.width || ''), String(entry.height || ''), nowText(), displayName(u), u.uid])
+      clearEntriesCache(cfg)
+      CacheService.getScriptCache().remove('live:' + cfg.id)
+      return { entry: Object.assign({ mine: true }, entry) }
+    } finally {
+      lock.releaseLock()
+    }
+  },
+
+  // ลบผลงานของตัวเอง (ได้เฉพาะตอนที่ยังไม่มีใครโหวต)
+  deleteMyEntry: (body) => {
+    const u = requireUser(body)
+    const cfg = voterCampaign(body, u)
+    const entry = readEntries(cfg).find((e) => e.id === String(body.entryId))
+    if (!entry || entry.by !== u.uid) throw vtError(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานของคุณ')
+    removeAppEntry(cfg, entry.id)
+    return { entryId: entry.id }
   },
 
   // ผลสดสำหรับผู้โหวต (หน้าเว็บถามซ้ำทุก ~20 วินาที · ผลรวมจำไว้ 15 วินาทีเพื่อไม่ให้อ่านชีททุกครั้ง)
@@ -246,6 +284,7 @@ const ACTIONS = {
     if (isClosed(cfg)) throw vtError(403, 'CLOSED', 'ปิดรับโหวตแล้ว')
     const entry = readEntries(cfg).find((e) => e.id === String(body.entryId))
     if (!entry) throw vtError(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้ อาจถูกลบออกไปแล้ว')
+    if (entry.by && entry.by === u.uid) throw vtError(400, 'OWN_ENTRY', 'โหวตให้ผลงานของตัวเองไม่ได้ ลองเลือกผลงานของเพื่อน ๆ ดูนะ')
 
     const lock = LockService.getScriptLock()
     if (!lock.tryLock(20000)) throw vtError(503, 'BUSY', 'มีคนโหวตพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง')
@@ -309,6 +348,7 @@ const ACTIONS = {
       createdAt: prev ? prev.createdAt : nowText(),
       createdBy: prev ? prev.createdBy : displayName(admin),
       published: prev ? prev.published : false,
+      allowSubmit: c.source === 'app' && (c.allowSubmit !== undefined ? Boolean(c.allowSubmit) : Boolean(prev && prev.allowSubmit)),
     }
     if (!next.title) throw vtError(400, 'BAD_TITLE', 'กรุณาใส่ชื่อกิจกรรม')
     if (next.endsAt && isNaN(new Date(next.endsAt).getTime())) throw vtError(400, 'BAD_DATE', 'วันปิดโหวตไม่ถูกต้อง')
@@ -395,19 +435,16 @@ const ACTIONS = {
     const cfg = campaignById(body.campaignId)
     if (cfg.source !== 'app') throw vtError(400, 'WRONG_SOURCE', 'ผลงานของกิจกรรมนี้อยู่ในชีท ให้ลบที่ชีทแทน')
     const entryId = String(body.entryId)
-    if (readVotes(cfg).some((v) => v.entryId === entryId)) throw vtError(409, 'HAS_VOTES', 'ผลงานนี้มีคนโหวตแล้ว ลบไม่ได้')
-    const sh = dataBook().getSheetByName('ENTRIES')
-    const rows = sh.getDataRange().getDisplayValues()
-    const i = rows.findIndex((r, k) => k > 0 && r[0] === cfg.id && r[1] === entryId)
-    if (i < 1) throw vtError(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้')
-    sh.deleteRow(i + 1)
-    try {
-      DriveApp.getFileById(rows[i][4]).setTrashed(true)
-    } catch (_) {
-      /* file already gone */
-    }
-    clearEntriesCache(cfg)
+    removeAppEntry(cfg, entryId)
     return { entryId: entryId }
+  },
+
+  setAllowSubmit: (body) => {
+    requireAdmin(body)
+    const cfg = campaignById(body.campaignId)
+    if (cfg.source !== 'app') throw vtError(400, 'WRONG_SOURCE', 'ใช้ได้กับกิจกรรมโหวตภาพแบบอัปโหลดในแอปเท่านั้น')
+    writeCampaign(Object.assign({}, cfg, { allowSubmit: Boolean(body.allowSubmit) }))
+    return { campaign: publicCampaign(campaignById(cfg.id)) }
   },
 
   campaignQuestions: (body) => {
@@ -799,7 +836,7 @@ function newId(prefix) {
 
 function listCampaigns() {
   const cache = CacheService.getScriptCache()
-  const hit = cache.get('campaigns3')
+  const hit = cache.get('campaigns4')
   if (hit) return JSON.parse(hit)
 
   let rows = readDataTab('CAMPAIGNS')
@@ -828,21 +865,22 @@ function listCampaigns() {
       // แถวก่อน v3.0 ไม่มีคอลัมน์นี้: ใช้กิจกรรมที่เคยเปิดใช้อยู่
       published: r[9] ? r[9] === 'yes' : r[0] === legacyActive,
       deleted: r[10] === 'yes',
+      allowSubmit: r[11] === 'yes',
     }))
     .filter((c) => !c.deleted)
     .reverse()
-  cache.put('campaigns3', JSON.stringify(list), 120)
+  cache.put('campaigns4', JSON.stringify(list), 120)
   return list
 }
 
 function writeCampaign(c) {
-  const row = [c.id, c.title, c.subtitle, c.endsAt, c.resultsMode || (c.showCounts ? 'always' : 'never'), c.source, c.sheetUrl || '', c.createdAt, c.createdBy, c.published ? 'yes' : 'no', c.deleted ? 'yes' : '']
+  const row = [c.id, c.title, c.subtitle, c.endsAt, c.resultsMode || (c.showCounts ? 'always' : 'never'), c.source, c.sheetUrl || '', c.createdAt, c.createdBy, c.published ? 'yes' : 'no', c.deleted ? 'yes' : '', c.allowSubmit ? 'yes' : '']
   const sh = dataBook().getSheetByName('CAMPAIGNS')
   const ids = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues().map((r) => r[0]) : []
   const at = ids.indexOf(c.id)
   if (at === -1) appendDataRow('CAMPAIGNS', row)
   else sh.getRange(at + 2, 1, 1, row.length).setNumberFormat('@').setValues([row.map(String)])
-  CacheService.getScriptCache().remove('campaigns3')
+  CacheService.getScriptCache().remove('campaigns4')
 }
 
 function campaignById(id) {
@@ -910,6 +948,7 @@ function publicCampaign(cfg) {
     resultsMode: cfg.resultsMode || 'never',
     source: cfg.source,
     published: Boolean(cfg.published),
+    allowSubmit: Boolean(cfg.allowSubmit),
     closed: isClosed(cfg),
   }
 }
@@ -919,7 +958,7 @@ const isClosed = (cfg) => Boolean(cfg.endsAt) && Date.now() > new Date(cfg.endsA
 /* ───────────── entries ───────────── */
 
 const entriesCacheKey = (cfg) =>
-  cfg.source === 'app' ? 'entries:app:' + cfg.id : 'entries:' + Utilities.base64EncodeWebSafe(cfg.sheetUrl).slice(-60)
+  cfg.source === 'app' ? 'entries:app2:' + cfg.id : 'entries:' + Utilities.base64EncodeWebSafe(cfg.sheetUrl).slice(-60)
 
 function clearEntriesCache(cfg) {
   CacheService.getScriptCache().remove(entriesCacheKey(cfg))
@@ -943,7 +982,24 @@ function readEntries(cfg) {
 function readAppEntries(cfg) {
   return readDataTab('ENTRIES')
     .filter((r) => r[0] === cfg.id && r[1])
-    .map((r) => ({ id: r[1], title: r[2], author: r[3], imageId: r[4], width: Number(r[5]) || null, height: Number(r[6]) || null }))
+    .map((r) => ({ id: r[1], title: r[2], author: r[3], imageId: r[4], width: Number(r[5]) || null, height: Number(r[6]) || null, by: r[9] || '' }))
+}
+
+function removeAppEntry(cfg, entryId) {
+  if (cfg.source !== 'app') throw vtError(400, 'WRONG_SOURCE', 'ผลงานของกิจกรรมนี้อยู่ในชีท ให้ลบที่ชีทแทน')
+  if (readVotes(cfg).some((v) => v.entryId === entryId)) throw vtError(409, 'HAS_VOTES', 'ผลงานนี้มีคนโหวตแล้ว ลบไม่ได้')
+  const sh = dataBook().getSheetByName('ENTRIES')
+  const rows = sh.getDataRange().getDisplayValues()
+  const i = rows.findIndex((r, k) => k > 0 && r[0] === cfg.id && r[1] === entryId)
+  if (i < 1) throw vtError(404, 'ENTRY_NOT_FOUND', 'ไม่พบผลงานนี้')
+  sh.deleteRow(i + 1)
+  try {
+    DriveApp.getFileById(rows[i][4]).setTrashed(true)
+  } catch (_) {
+    /* file already gone */
+  }
+  clearEntriesCache(cfg)
+  CacheService.getScriptCache().remove('live:' + cfg.id)
 }
 
 function parseSheetUrl(url) {

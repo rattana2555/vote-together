@@ -249,6 +249,7 @@ export default function CampaignEditor({ initial, onBack, onSaved }) {
     resultsMode: initial.resultsMode || (initial.showCounts ? 'always' : initial.id ? 'never' : 'afterVote'),
     source: initial.source || 'form',
     sheetUrl: initial.sheetUrl || '',
+    allowSubmit: Boolean(initial.allowSubmit),
   }))
   const [entries, setEntries] = useState([])
   const [detected, setDetected] = useState(null)
@@ -340,6 +341,12 @@ export default function CampaignEditor({ initial, onBack, onSaved }) {
           <label className="field field-wide">
             <span>ลิงก์ชีทคำตอบ</span>
             <input type="url" required value={form.sheetUrl} onChange={set('sheetUrl')} placeholder="https://docs.google.com/spreadsheets/d/…" />
+          </label>
+        )}
+        {form.source === 'app' && (
+          <label className="check field-wide">
+            <input type="checkbox" checked={form.allowSubmit} onChange={set('allowSubmit')} />
+            <span>เปิดให้พนักงานส่งผลงานเองในแอป (คนละ 1 ภาพ ชื่อเจ้าของผลงานใส่ให้อัตโนมัติ · โหวตผลงานตัวเองไม่ได้)</span>
           </label>
         )}
         <div className="field field-wide">
